@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+
+  orchestrator:
+    build:
+      context: clearcoreai/orchestrator
+    ports:
+      - "8000:8000"
+
+  fetch_articles_agent:
+    build:
+      context: agents/fetch_articles
+    ports:
+      - "8500:8500"
+    depends_on:
+      - orchestrator
