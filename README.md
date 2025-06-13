@@ -88,7 +88,7 @@ See [ROADMAP.md](ROADMAP.md).
 
 ## License
 
-Licensed under Apache 2.0 License.
+Licensed under MIT License.
 
 ---
 

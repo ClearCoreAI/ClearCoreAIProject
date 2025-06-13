@@ -73,7 +73,7 @@ docker run -p 8500:8500 fetch_articles_agent
 
 ## License
 
-Licensed under Apache 2.0 License.
+Licensed under MIT License.
 
 ---
 
