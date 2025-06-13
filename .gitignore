@@ -1,0 +1,93 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# Compiled files
+*.so
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Pipenv
+Pipfile.lock
+
+# Pyre type checker
+.pyre/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# PyCharm / IntelliJ IDEA
+.idea/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Logs - ClearCoreAI (orchestrator and agents)
+**/logs/
+**/logs/*
+
+# Memory folders - ClearCoreAI
+**/memory/short_term/
+**/memory/short_term/*
+**/memory/long_term/
+**/memory/long_term/*
+
+# Outputs - ClearCoreAI
+**/output/
+**/output/*
+
+# License keys (only license_keys.json.template is versioned)
+**/license_keys.json
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+MANIFEST
+
+# PyInstaller artifacts
+*.manifest
+*.spec
+
+# C/C++ compiled extensions
+*.c
+*.cpp
+*.h
+*.o
+*.obj
+*.lib
+*.dll
+*.exp
+*.pdb
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Test results and coverage
+.coverage
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Neo4j data (shared memory - local only, not versioned)
+shared_memory/neo4j/data/
