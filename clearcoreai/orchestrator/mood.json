@@ -1,0 +1,14 @@
+{
+    "current_mood": "neutral",
+    "last_updated": "2025-06-13T12:00:00Z",
+    "history": [
+        {
+            "timestamp": "2025-06-13T09:00:00Z",
+            "mood": "neutral"
+        }
+    ],
+    "mood_rules": {
+        "healthy_threshold_agents": 1,
+        "degraded_threshold_agents": 0
+    }
+}
