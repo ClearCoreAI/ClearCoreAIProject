@@ -98,6 +98,22 @@ def health_check():
     """
     return {"status": "Fetch Articles Agent is up and running."}
 
+@app.get("/capabilities")
+def get_capabilities():
+    """
+    Returns the agent's capabilities as declared in its manifest.json.
+    Used by the orchestrator to validate and register the agent.
+
+    Version:
+        - First implemented: 0.1.1
+        - Validated by: Olivier Hays
+    """
+    try:
+        with open("manifest.json", "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"error": "manifest.json not found"}
+
 
 @app.get("/metrics")
 def get_metrics():

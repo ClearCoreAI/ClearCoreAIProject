@@ -1,96 +1,103 @@
 
-# ClearCoreAI Orchestrator
+ClearCoreAI Orchestrator
+=========================
 
-**Version:** 0.1.0  
-**Last Updated:** 2025-06-13  
-**Validated by:** Olivier Hays  
+Version: 0.1.0  
+Last Updated: 2025-06-15  
+Validated by: Olivier Hays  
 
 ---
 
-## Overview
+Overview
+--------
 
 The ClearCoreAI Orchestrator is the central component of the ClearCoreAI architecture.  
-It provides **transparent and auditable orchestration** of modular AI agents running as independent containers.
+It provides transparent and auditable orchestration of modular AI agents running as independent containers.
 
-**Key features:**
+Key features:
 
-✅ Agent registration & listing  
-✅ Agent metrics aggregation  
-✅ Global orchestrator metrics  
-✅ Global orchestrator mood  
-✅ Designed for modularity & security  
+- Agent registration & discovery
+- Dynamic manifest validation
+- Dynamic capability & dependency mapping
+- Global orchestrator metrics
+- Global orchestrator mood tracking
+- Designed for modularity, observability & security
 
 ---
 
-## Endpoints
+Endpoints
+---------
 
 ### /health
-
-Simple orchestrator health check.
+Check the orchestrator's health status.
 
 ### /register_agent
+Register an AI agent.
 
-Registers an AI agent.  
-Body must include:
-
-```json
+Request body must include:
 {
     "agent_name": "...",
     "version": "...",
     "url": "http://agent-container:port"
 }
-```
+
+This endpoint also triggers validation of the agent's manifest against the common template.
 
 ### /agents
-
-Lists all registered agents.
+List all registered agents.
 
 ### /agents/metrics
-
-Aggregates `/metrics` from all registered agents.
+Aggregate /metrics from all registered agents.
 
 ### /metrics
-
-Orchestrator own metrics:
-
-- uptime
-- registered agents count
-- total AIWaterdrops consumed
+Show orchestrator's own metrics:
+- Uptime
+- Registered agents count
+- Total AIWaterdrops consumed
 
 ### /mood
-
-Orchestrator own mood (from `mood.json`).
-
----
-
-## Usage
-
-Start orchestrator with:
-
-```bash
-docker compose up --build
-```
-
-Or inside orchestrator folder:
-
-```bash
-docker build -t clearcoreai-orchestrator .
-docker run -p 8000:8000 clearcoreai-orchestrator
-```
+Read orchestrator's mood (stored in mood.json).
 
 ---
 
-## Roadmap
+Architecture
+------------
 
-See [ROADMAP.md](ROADMAP.md).
+The orchestrator:
+- Maintains a central registry (`agents.json`)
+- Reads and validates agent manifests dynamically
+- Aligns each agent's declared capabilities and dependencies with system-level needs
+- Uses a unified `manifest_template.json` to ensure conformity and interoperability
 
 ---
 
-## License
+Usage
+-----
+
+To start the orchestrator:
+
+Via Docker Compose:
+    docker compose up --build
+
+Or inside the orchestrator folder:
+    docker build -t clearcoreai-orchestrator .
+    docker run -p 8000:8000 clearcoreai-orchestrator
+
+---
+
+Roadmap
+-------
+
+See ROADMAP.md for future features and versioning milestones.
+
+---
+
+License
+-------
 
 Licensed under MIT License.
 
 ---
 
-# 🚀 Let's orchestrate AI agents transparently!  
-ClearCoreAI Team
+Let's orchestrate AI agents transparently and responsibly.  
+— ClearCoreAI Team

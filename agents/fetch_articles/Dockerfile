@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py /app/
 COPY mood.json /app/
 COPY license_keys.json.template /app/
-COPY agent_manifest.json /app/
+COPY manifest.json /app/
 COPY memory/ /app/memory/
 
 # Expose port

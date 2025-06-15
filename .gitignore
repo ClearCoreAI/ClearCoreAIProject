@@ -55,6 +55,9 @@ Desktop.ini
 # License keys (only license_keys.json.template is versioned)
 **/license_keys.json
 
+# Registered agents state (dynamic, not versioned)
+**/orchestrator/agents.json
+
 # Build artifacts
 build/
 dist/

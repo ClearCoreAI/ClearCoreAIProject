@@ -1,0 +1,91 @@
+{
+  "name": "summarize_articles",
+  "version": "0.1.0",
+  "description": "Summarizes a list of input articles using a language model. Designed for modular integration in a ClearCoreAI pipeline.",
+  "author": "Olivier Hays",
+  "contact": "https://github.com/ClearCoreAI/clearcoreai",
+  "license": "MIT",
+
+  "input_spec": {
+    "type": "object",
+    "description": "A list of articles to summarize.",
+    "properties": {
+      "articles": {
+        "type": "array",
+        "description": "List of articles with title and content fields.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string", "description": "Title of the article" },
+            "content": { "type": "string", "description": "Main body of the article" }
+          },
+          "required": ["content"]
+        }
+      }
+    },
+    "required": ["articles"]
+  },
+
+  "output_spec": {
+    "type": "object",
+    "description": "Summaries of each input article.",
+    "properties": {
+      "summaries": {
+        "type": "array",
+        "description": "Summarized text for each article in the same order.",
+        "items": { "type": "string" }
+      },
+      "waterdrops_used": {
+        "type": "integer",
+        "description": "Estimated resource consumption for summarization"
+      }
+    },
+    "required": ["summaries"]
+  },
+
+  "capabilities": [
+    "text_summarization",
+    "structured_output_generation",
+    "llm_interaction"
+  ],
+
+  "required_dependencies": [
+    "mistral"
+  ],
+
+  "estimate_cost": {
+    "unit": "waterdrops",
+    "per_call": 4,
+    "per_second": 0
+  },
+
+  "mood_profile": {
+    "initial": "neutral",
+    "possible": ["neutral", "active", "overloaded"]
+  },
+
+  "memory_profile": {
+    "short_term": true,
+    "long_term": false,
+    "shared": false
+  },
+
+  "tools_profile": {
+    "uses_llm": true,
+    "external_apis": ["Mistral LLM API"],
+    "internal_tools": ["mood_tracker", "license_key_loader"]
+  },
+
+  "usage_guidelines": {
+    "intended_use": "Summarize articles from fetch agents or external sources in a ClearCoreAI pipeline.",
+    "limitations": "Limited to short-form summaries using a single LLM engine. Does not include citation or source attribution.",
+    "safety_notes": "Summaries may reflect model bias or hallucination. Ensure content is reviewed before publication."
+  },
+
+  "api": {
+    "endpoint": "/summarize",
+    "method": "POST"
+  },
+
+  "tags": ["summarization", "llm", "text", "agent", "mistral", "pipeline"]
+}

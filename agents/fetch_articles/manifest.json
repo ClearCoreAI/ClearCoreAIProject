@@ -1,0 +1,75 @@
+{
+  "name": "fetch_articles",
+  "version": "0.1.0",
+  "description": "Fetches a predefined list of example news articles to serve as input for downstream agents.",
+  "author": "ClearCoreAI Contributors",
+  "contact": "https://github.com/ClearCoreAI/clearcoreai",
+  "license": "MIT",
+
+  "input_spec": {
+    "type": "object",
+    "description": "No input required to call this agent."
+  },
+  "output_spec": {
+    "type": "object",
+    "properties": {
+      "articles": {
+        "type": "array",
+        "description": "List of sample articles to be summarized or classified.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string", "description": "Title of the article" },
+            "content": { "type": "string", "description": "Full content of the article" }
+          },
+          "required": ["title", "content"]
+        }
+      }
+    },
+    "required": ["articles"]
+  },
+
+  "capabilities": [
+    "fetch_static_articles",
+    "generate_article_collection",
+    "provide_sample_inputs"
+  ],
+
+  "required_dependencies": [],
+
+  "estimate_cost": {
+    "unit": "waterdrops",
+    "per_call": 0.05,
+    "per_second": 0.0
+  },
+
+  "mood_profile": {
+    "initial": "neutral",
+    "possible": ["neutral", "happy"]
+  },
+
+  "memory_profile": {
+    "short_term": false,
+    "long_term": false,
+    "shared": false
+  },
+
+  "tools_profile": {
+    "uses_llm": false,
+    "external_apis": [],
+    "internal_tools": ["article_template_generator"]
+  },
+
+  "usage_guidelines": {
+    "intended_use": "Provides consistent and simple article data for testing summarization and classification pipelines.",
+    "limitations": "Does not fetch real or dynamic news content. Always returns the same articles.",
+    "safety_notes": "No external data sources or sensitive content involved."
+  },
+
+  "api": {
+    "endpoint": "/fetch",
+    "method": "GET"
+  },
+
+  "tags": ["agent", "fetch", "articles", "demo", "pipeline_input"]
+}

@@ -1,0 +1,10 @@
+# Core dependencies
+fastapi==0.110.0              # Lightweight framework for building async REST APIs
+uvicorn[standard]==0.29.0     # ASGI server to run FastAPI applications
+
+# HTTP client
+httpx==0.27.0                 # Async HTTP client (used to call external LLM APIs)
+
+# Environment variable loading (optional)
+python-dotenv==1.0.1          # Loads .env files into environment variables
+requests==2.31.0             # HTTP client for Mistral API calls

@@ -1,0 +1,31 @@
+{
+    "current_mood": "neutral",
+    "last_updated": "2025-06-14T00:00:00Z",
+    "history": [
+        {
+            "timestamp": "2025-06-13T10:00:00Z",
+            "mood": "neutral"
+        },
+        {
+            "timestamp": "2025-06-13T16:30:00Z",
+            "mood": "active"
+        }
+    ],
+    "mood_transitions": {
+        "neutral": ["active", "overwhelmed"],
+        "active": ["neutral", "overwhelmed"],
+        "overwhelmed": ["neutral"]
+    },
+    "mood_rules": {
+        "success_rate_threshold": {
+            "active": 0.9,
+            "neutral": 0.7,
+            "overwhelmed": 0.4
+        },
+        "error_rate_threshold": {
+            "active": 0.1,
+            "neutral": 0.25,
+            "overwhelmed": 0.6
+        }
+    }
+}

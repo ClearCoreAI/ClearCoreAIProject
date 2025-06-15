@@ -1,4 +1,22 @@
-fastapi==0.110.0
-uvicorn[standard]==0.27.1
-pydantic==1.10.8
-requests==2.31.0
+# === Core web server dependencies ===
+fastapi==0.111.0              # Lightweight and efficient web framework for async REST APIs
+uvicorn[standard]==0.29.0     # ASGI server to run FastAPI apps in both dev and production environments
+
+# === Data modeling and validation ===
+pydantic==2.7.1               # Powerful data validation and settings management (now with BaseModel V2)
+
+# === HTTP requests (used for contacting agents and remote endpoints) ===
+requests==2.31.0              # Synchronous HTTP client used to interact with registered agents
+
+# === Configuration and secrets management ===
+python-dotenv==1.0.1          # Loads environment variables from a .env file, useful for dev and production
+
+# === JSON schema validation ===
+jsonschema==4.22.0            # Used to validate agent manifests against a shared manifest_template.json
+
+# === Typing support (for Python <3.12 compatibility) ===
+typing-extensions==4.11.0     # Backport of Python 3.12+ typing features for broader compatibility
+
+# === Optional: testing and debugging utilities ===
+# httpx==0.27.0               # Async alternative to requests, if needed for future extensions
+# pytest==8.2.1               # Unit testing framework (recommended for testing orchestrator logic)

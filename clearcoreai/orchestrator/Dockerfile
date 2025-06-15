@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py /app/
 COPY agent_manager.py /app/
 COPY mood.json /app/
+COPY manifest_template.json /app/
 COPY models/ /app/models/
 
 # Expose port
