@@ -1,7 +1,7 @@
 {
   "name": "summarize_articles",
-  "version": "0.1.0",
-  "description": "Summarizes a list of input articles using a language model. Designed for modular integration in a ClearCoreAI pipeline.",
+  "version": "0.2.0",
+  "description": "Summarizes a list of input articles using a language model. Supports structured and unstructured summarization, intended for orchestrated ClearCoreAI pipelines.",
   "author": "Olivier Hays",
   "contact": "https://github.com/ClearCoreAI/clearcoreai",
   "license": "MIT",
@@ -35,8 +35,20 @@
         "description": "Summarized text for each article in the same order.",
         "items": { "type": "string" }
       },
+      "summaries_structured": {
+        "type": "array",
+        "description": "Structured format of summaries, if structured output is requested.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "summary": { "type": "string" },
+            "format": { "type": "string" }
+          },
+          "required": ["summary"]
+        }
+      },
       "waterdrops_used": {
-        "type": "integer",
+        "type": "number",
         "description": "Estimated resource consumption for summarization"
       }
     },
@@ -45,8 +57,7 @@
 
   "capabilities": [
     "text_summarization",
-    "structured_output_generation",
-    "llm_interaction"
+    "structured_output_generation"
   ],
 
   "required_dependencies": [
@@ -83,9 +94,10 @@
   },
 
   "api": {
-    "endpoint": "/summarize",
-    "method": "POST"
+    "endpoint": "/execute",
+    "method": "POST",
+    "dispatches_capabilities": true
   },
 
-  "tags": ["summarization", "llm", "text", "agent", "mistral", "pipeline"]
+  "tags": ["summarization", "llm", "text", "agent", "mistral", "pipeline", "orchestration"]
 }

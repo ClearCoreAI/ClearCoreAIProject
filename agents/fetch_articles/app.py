@@ -1,40 +1,56 @@
 """
-Module: fetch_articles agent
-Process: FastAPI agent API
+Module: fetch_articles
+Component: Agent API
+Purpose: Serve static news articles and expose orchestration-compatible capabilities
 
 Description:
-Example agent for ClearCoreAI: fetch_articles. Registers itself to the orchestrator and provides a simple API.
+This ClearCoreAI agent registers itself to the orchestrator and exposes multiple endpoints:
+- fetch static articles
+- transform articles into a collection format
+- monitor mood and track water usage
+It supports orchestrator-driven execution via a generic `/execute` endpoint.
 
-Version: 0.1.0
-Initial State: Agent starts and registers with orchestrator.
-Final State: Agent serves API endpoints.
+Philosophy:
+- All capabilities must be declared via a manifest
+- State (mood and water usage) is persisted and observable
+- Agents must self-register on startup and support orchestration without tight coupling
 
-Exceptions handled:
-- ConnectionError — if registration to orchestrator fails.
+Initial State:
+- mood.json is present and loaded
+- aiwaterdrops.json file may exist or is initialized to 0
+- manifest.json describes declared capabilities
 
-Validation:
-- Validated by: Olivier Hays
-- Date: 2025-06-11
+Final State:
+- Agent is registered to orchestrator
+- Static articles are retrievable
+- Water usage and mood are updated on each call
+
+Version: 0.2.0
+Validated by: Olivier Hays
+Date: 2025-06-16
 
 Estimated Water Cost:
 - 1 waterdrop per /health call
-- 3 waterdrops per /get_articles call (includes mock processing)
-- ~2 waterdrops per agent registration attempt
-
+- 3 waterdrops per /get_articles call
+- 0.02 waterdrops per /execute call
 """
+
+# ----------- Imports ----------- #
 import time
 import json
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 import requests
 
-# Initialize variables
+# ----------- Constants ----------- #
 ORCHESTRATOR_URL = "http://orchestrator:8000/register_agent"
 AGENT_NAME = "fetch_articles"
 START_TIME = time.time()
-
-# Load AIWaterdrops from memory
 AIWATERDROPS_FILE = "memory/short_term/aiwaterdrops.json"
+
+# ----------- Internal State / Registry ----------- #
+with open("mood.json", "r") as f:
+    mood = json.load(f)
 
 def load_aiwaterdrops():
     try:
@@ -48,21 +64,87 @@ def save_aiwaterdrops(value):
     with open(AIWATERDROPS_FILE, "w") as f:
         json.dump({"aiwaterdrops_consumed": value}, f)
 
-# Load initial value
 aiwaterdrops_consumed = load_aiwaterdrops()
 
-# Load mood
-with open("mood.json", "r") as f:
-    mood = json.load(f)
+# ----------- App Initialization ----------- #
+app = FastAPI(title="Fetch Articles Agent", version="0.2.0")
 
+# ----------- Helper Functions ----------- #
+def fetch_static_articles():
+    """
+    Returns a fixed set of example news articles.
 
-app = FastAPI(title="Fetch Articles Agent", version="0.1.0")
+    Initial State:
+        - No external input required
 
+    Final State:
+        - A list of article dicts with title, source, and content
+
+    Water Cost:
+        - ~3 waterdrops (charged in /get_articles)
+    """
+    return {
+        "articles": [
+            {
+                "title": "AI Revolutionizes Healthcare",
+                "source": "Example News",
+                "content": "AI technologies are transforming healthcare by enabling faster diagnoses and personalized treatments."
+            },
+            {
+                "title": "Climate Change Update",
+                "source": "Example Times",
+                "content": "Recent studies show significant progress in renewable energy adoption worldwide."
+            },
+            {
+                "title": "SpaceX Launches New Mission",
+                "source": "Space News Daily",
+                "content": "SpaceX successfully launched a new mission to deploy communication satellites."
+            }
+        ]
+    }
+
+def generate_article_collection(data):
+    """
+    Converts a raw list of articles into a collection format with count.
+
+    Parameters:
+        data (dict): contains key "articles": list of dicts
+
+    Returns:
+        dict: {"collection": {"count": int, "items": [...] }}
+
+    Initial State:
+        - data includes a valid "articles" list
+
+    Final State:
+        - A normalized structure is returned
+
+    Water Cost:
+        - Charged in /execute (0.02)
+    """
+    articles = data.get("articles", [])
+    return {
+        "collection": {
+            "count": len(articles),
+            "items": articles
+        }
+    }
+
+# ----------- Startup Logic ----------- #
 def register_with_orchestrator():
     """
-    Register the agent with the orchestrator.
+    Registers this agent to the central orchestrator via HTTP POST.
+
+    Initial State:
+        - Orchestrator is running and reachable at ORCHESTRATOR_URL
+
+    Final State:
+        - Agent appears in orchestrator’s registry with declared capabilities
+
+    Raises:
+        ConnectionError: If orchestrator is not available
     """
-    time.sleep(2)  # wait for orchestrator to be ready
+    time.sleep(2)  # Ensure orchestrator is ready
     try:
         response = requests.post(ORCHESTRATOR_URL, params={"agent_name": AGENT_NAME})
         print(response.json())
@@ -73,40 +155,27 @@ def register_with_orchestrator():
 def startup_event():
     register_with_orchestrator()
 
+# ----------- API Endpoints ----------- #
 @app.get("/health")
 def health_check():
     """
-    Module: fetch_articles agent
-    Function: health_check
+    Health check endpoint.
 
-    Description:
-    Returns the current status of the agent.
+    Returns:
+        dict: status string
 
-    Version: 0.1.0
-    Initial State: Agent running.
-    Final State: No change.
-
-    Exceptions handled:
-    - None
-
-    Validation:
-    - Validated by: Olivier Hays
-    - Date: 2025-06-11
-
-    Estimated Water Cost:
-    - 1 waterdrop per call
+    Water Cost:
+        - 1 waterdrop
     """
     return {"status": "Fetch Articles Agent is up and running."}
 
 @app.get("/capabilities")
 def get_capabilities():
     """
-    Returns the agent's capabilities as declared in its manifest.json.
-    Used by the orchestrator to validate and register the agent.
+    Returns the agent’s declared capabilities.
 
-    Version:
-        - First implemented: 0.1.1
-        - Validated by: Olivier Hays
+    Raises:
+        FileNotFoundError: if manifest.json is missing
     """
     try:
         with open("manifest.json", "r") as f:
@@ -114,128 +183,46 @@ def get_capabilities():
     except FileNotFoundError:
         return {"error": "manifest.json not found"}
 
-
 @app.get("/metrics")
 def get_metrics():
     """
-    Purpose:
-        Returns agent metrics including AIWaterdrops consumption, current mood, uptime, and version.
+    Returns live metrics for monitoring.
 
-    Initial State:
-        Agent is running.
-
-    Final State:
-        No state change.
-
-    Inputs:
-        None
-
-    Outputs:
-        JSON with agent_name, version, uptime, current_mood, aiwaterdrops_consumed.
-
-    Exceptions:
-        None
-
-    AIWaterdrops estimation:
-        - Estimated Waterdrops per call: 0.01
-
-    Version:
-        - First implemented in version: 0.1.0
-        - Last validated in version: 0.1.0
-        - Validated by: Olivier Hays
+    Includes:
+        - agent version
+        - uptime
+        - mood
+        - water consumption
     """
     uptime_seconds = int(time.time() - START_TIME)
-
     return {
-        "agent_name": "fetch_articles",
-        "version": "0.1.0",
+        "agent_name": AGENT_NAME,
+        "version": "0.2.0",
         "uptime_seconds": uptime_seconds,
         "current_mood": mood["current_mood"],
         "aiwaterdrops_consumed": aiwaterdrops_consumed
     }
 
-
 @app.get("/get_articles")
 def get_articles():
     """
-    Purpose:
-        Returns example articles in JSON format.
-
-    Initial State:
-        Agent ready to serve articles.
+    Serves static articles and tracks water usage.
 
     Final State:
-        AIWaterdrops counter incremented and persisted.
+        - aiwaterdrops_consumed is incremented and saved
 
-    Inputs:
-        None
-
-    Outputs:
-        JSON list of articles with title, source, and content.
-
-    Exceptions:
-        None
-
-    AIWaterdrops estimation:
-        - Estimated Waterdrops per call: 0.05
-
-    Version:
-        - First implemented in version: 0.1.0
-        - Last validated in version: 0.1.0
-        - Validated by: ClearCoreAI Contributors
+    Water Cost:
+        - 3 waterdrops
     """
     global aiwaterdrops_consumed
-    aiwaterdrops_consumed += 0.05  # Simulate waterdrop consumption
+    aiwaterdrops_consumed += 3
     save_aiwaterdrops(aiwaterdrops_consumed)
-
-    articles = [
-        {
-            "title": "AI Revolutionizes Healthcare",
-            "source": "Example News",
-            "content": "AI technologies are transforming healthcare by enabling faster diagnoses and personalized treatments."
-        },
-        {
-            "title": "Climate Change Update",
-            "source": "Example Times",
-            "content": "Recent studies show significant progress in renewable energy adoption worldwide."
-        },
-        {
-            "title": "SpaceX Launches New Mission",
-            "source": "Space News Daily",
-            "content": "SpaceX successfully launched a new mission to deploy communication satellites."
-        }
-    ]
-
-    return {"articles": articles}
+    return fetch_static_articles()
 
 @app.get("/mood")
 def get_mood():
     """
-    Purpose:
-        Returns the current mood and mood history of the agent.
-
-    Initial State:
-        Agent running.
-
-    Final State:
-        No state change.
-
-    Inputs:
-        None
-
-    Outputs:
-        JSON with current_mood, last_updated, history.
-
-    Exceptions:
-        None
-
-    AIWaterdrops estimation:
-        - Estimated Waterdrops per call: 0.01
-
-    Version:
-        - First implemented in version: 0.1.0
-        - Last validated in version: 0.1.0
-        - Validated by: Olivier Hays
+    Exposes internal agent mood for monitoring/debugging.
     """
     return {
         "current_mood": mood.get("current_mood", "unknown"),
@@ -243,4 +230,50 @@ def get_mood():
         "history": mood.get("history", [])
     }
 
+@app.post("/execute")
+async def execute(request: Request):
+    """
+    Dispatcher endpoint for orchestrator execution.
 
+    Parameters:
+        request (Request): JSON with "capability" and optional "input" field
+
+    Returns:
+        dict: Result of capability execution
+
+    Initial State:
+        - capability is one of the known agent functions
+
+    Final State:
+        - Called function is executed
+        - Water usage is incremented and saved
+
+    Raises:
+        HTTPException 400: if unknown capability
+        HTTPException 500: if execution fails
+
+    Water Cost:
+        - 0.02 waterdrops base + underlying cost if applicable
+    """
+    global aiwaterdrops_consumed
+
+    try:
+        payload = await request.json()
+        capability = payload.get("capability")
+        input_data = payload.get("input", {})
+
+        if capability == "fetch_static_articles":
+            aiwaterdrops_consumed += 0.02
+            save_aiwaterdrops(aiwaterdrops_consumed)
+            return fetch_static_articles()
+
+        elif capability == "generate_article_collection":
+            aiwaterdrops_consumed += 0.02
+            save_aiwaterdrops(aiwaterdrops_consumed)
+            return generate_article_collection(input_data)
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown capability: {capability}")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")

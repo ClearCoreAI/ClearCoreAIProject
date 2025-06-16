@@ -1,14 +1,14 @@
 {
   "name": "fetch_articles",
-  "version": "0.1.0",
-  "description": "Fetches a predefined list of example news articles to serve as input for downstream agents.",
+  "version": "0.2.0",
+  "description": "Fetches a predefined list of example news articles and can generate structured collections.",
   "author": "ClearCoreAI Contributors",
   "contact": "https://github.com/ClearCoreAI/clearcoreai",
   "license": "MIT",
 
   "input_spec": {
     "type": "object",
-    "description": "No input required to call this agent."
+    "description": "Only needed for 'generate_article_collection', which expects a list of articles."
   },
   "output_spec": {
     "type": "object",
@@ -24,15 +24,30 @@
           },
           "required": ["title", "content"]
         }
+      },
+      "collection": {
+        "type": "object",
+        "description": "Structured article collection if generated.",
+        "properties": {
+          "count": { "type": "integer", "description": "Number of articles" },
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/output_spec/properties/articles/items" }
+          }
+        }
       }
-    },
-    "required": ["articles"]
+    }
   },
 
   "capabilities": [
-    "fetch_static_articles",
-    "generate_article_collection",
-    "provide_sample_inputs"
+    {
+      "name": "fetch_static_articles",
+      "description": "Returns a hardcoded list of articles."
+    },
+    {
+      "name": "generate_article_collection",
+      "description": "Formats the articles into a structured collection object."
+    }
   ],
 
   "required_dependencies": [],
@@ -66,9 +81,9 @@
     "safety_notes": "No external data sources or sensitive content involved."
   },
 
-  "api": {
-    "endpoint": "/fetch",
-    "method": "GET"
+  "multi_capability_api": {
+    "endpoint": "/execute",
+    "method": "POST"
   },
 
   "tags": ["agent", "fetch", "articles", "demo", "pipeline_input"]

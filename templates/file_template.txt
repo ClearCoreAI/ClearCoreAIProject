@@ -1,0 +1,27 @@
+# ----------- Imports ----------- #
+
+
+# ----------- Constants ----------- #
+
+
+# ----------- App Initialization ----------- #
+
+
+# ----------- Internal State / Registry ----------- #
+
+
+# ----------- Startup Logic ----------- #
+
+
+# ----------- Helper Functions ----------- #
+
+# ----------- API Models ----------- #
+
+
+# ----------- API Endpoints ----------- #
+
+
+# ----------- Planning & Execution ----------- #
+
+
+# ----------- Debug Utilities ----------- #

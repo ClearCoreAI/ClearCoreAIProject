@@ -1,0 +1,26 @@
+def <function_name>(<parameters>) -> <return_type>:
+    """
+    <Clear, action-oriented function summary. Use an active verb (e.g. "Generates", "Validates", "Executes").>
+
+    Parameters:
+        <param> (<type>): <Short description of the input>
+        <param> (<type>): ...
+
+    Returns:
+        <return_type>: <What the function returns and in what format>
+
+    Initial State:
+        - <Preconditions required to safely run the function>
+        - e.g. "Configuration file is present and valid", "Agent registry is not empty"
+
+    Final State:
+        - <What the function guarantees after successful execution>
+        - e.g. "A structured plan is returned", "Results are persisted in memory"
+
+    Raises:
+        <ExceptionType>: <When this exception occurs>
+        <ExceptionType>: ...
+
+    Water Cost:
+        - <x> waterdrops per call (fixed or variable depending on complexity)
+    """

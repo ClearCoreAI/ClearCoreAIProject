@@ -1,0 +1,39 @@
+"""
+Module: orchestrator
+Component: Central Orchestrator API
+Purpose: Core routing and coordination layer for ClearCoreAI
+
+Description:
+This orchestrator exposes the REST API and manages all agent coordination within ClearCoreAI.
+It enables agent registration, manifest validation, capability discovery, compatibility checking,
+plan generation, and full pipeline execution. All operations follow a traceable and deterministic
+model compatible with multi-agent orchestration.
+
+Philosophy:
+- The orchestrator must only work with agents declared and validated through their manifest.
+- Each step must be auditable and reproducible from input to output.
+- All failures should return clear, structured messages to calling clients.
+- Execution plans must use only compatible agent capabilities based on declared I/O specs.
+- Energy usage is expressed in waterdrops to measure execution cost.
+
+Initial State:
+- `manifest_template.json` is present and valid
+- `license_keys.json` is present and contains required API keys
+- Agents may be pre-registered in `agents.json` or dynamically added
+- The FastAPI server is launched and ready to accept connections
+
+Final State:
+- Agents are validated and stored in memory and on disk
+- Connections between agents are inferred based on I/O spec compatibility
+- Plans are generated via LLM and executed across agents in sequence
+- All state changes and plan steps are returned as structured logs
+
+Version: 0.3.0
+Validated by: Olivier Hays
+Date: 2025-06-15
+
+Estimated Water Cost:
+- 0.2 waterdrops per /register_agent
+- 0.05 waterdrops per /agents or /manifest call
+- 3 waterdrops per complete planning and execution pipeline (/run_goal)
+"""
