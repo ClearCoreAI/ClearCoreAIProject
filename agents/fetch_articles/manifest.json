@@ -20,6 +20,7 @@
           "type": "object",
           "properties": {
             "title": { "type": "string", "description": "Title of the article" },
+            "source": { "type": "string", "description": "Source of the article" },
             "content": { "type": "string", "description": "Full content of the article" }
           },
           "required": ["title", "content"]

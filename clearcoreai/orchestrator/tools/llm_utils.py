@@ -39,23 +39,17 @@ import json
 from pathlib import Path
 from typing import Tuple
 
-# --------- License Key Loading --------- #
-LICENSE_PATH = Path("license_keys.json")
-try:
-    with open(LICENSE_PATH, "r") as f:
-        license_keys = json.load(f)
-except Exception as e:
-    raise RuntimeError("Missing license_keys.json. Cannot call Mistral API.") from e
 
 
 # --------- Core Function: Plan Generation --------- #
-def generate_plan_with_mistral(goal: str, agents_registry: dict) -> Tuple[str, int]:
+def generate_plan_with_mistral(goal: str, agents_registry: dict, license_keys: dict) -> Tuple[str, int]:
     """
     Generates a plan to achieve a user-defined goal using registered agents.
 
     Parameters:
         goal (str): A clear description of the user's objective.
         agents_registry (dict): Agent metadata including names and capabilities.
+        license_keys (str) : Mistral API license keys.
 
     Returns:
         tuple[str, int]: A step-by-step plan and its energy cost (in waterdrops).
@@ -135,8 +129,8 @@ def generate_plan_with_mistral(goal: str, agents_registry: dict) -> Tuple[str, i
         result = response.json()
         plan = result["choices"][0]["message"]["content"].strip()
         return plan, 1  # ~1 waterdrop used
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"Mistral API request failed: {e}")
-    except Exception as e:
-        raise Exception(f"Unexpected error during plan generation: {e}")
+    except requests.exceptions.RequestException as req_error:
+        raise Exception(f"Mistral API request failed: {req_error}")
+    except Exception as general_error:
+        raise Exception(f"Unexpected error during plan generation: {general_error}")
 

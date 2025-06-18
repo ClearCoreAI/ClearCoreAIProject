@@ -1,6 +1,6 @@
-# Core dependencies
-fastapi==0.110.0              # Lightweight framework for building async REST APIs
-uvicorn[standard]==0.29.0     # ASGI server to run FastAPI applications
+# === Core dependencies ===
+fastapi==0.110.0              # Lightweight async web framework to build the agent's API
+uvicorn[standard]==0.29.0     # ASGI server for running FastAPI apps in development or production
 
-# HTTP client
-requests==2.31.0              # Synchronous HTTP client for external API calls
+# === HTTP client ===
+requests==2.31.0              # Synchronous HTTP client used to register the agent with the orchestrator

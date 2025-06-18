@@ -4,27 +4,28 @@ Component: Agent API
 Purpose: Summarize a list of articles using the Mistral LLM
 
 Description:
-This ClearCoreAI agent exposes a FastAPI interface to receive articles,
-summarize them using the Mistral API, and return concise summaries.
-It reports its capabilities to the orchestrator and tracks internal
-mood and energy consumption via the metaphor of "waterdrops".
+This ClearCoreAI agent exposes a REST API to receive articles, summarize them using the Mistral API,
+and return concise summaries. It supports declarative capability exposure via a manifest, mood tracking,
+waterdrop accounting, and full compatibility with the orchestrator’s execution pipeline.
 
 Philosophy:
-- Inputs are validated explicitly (presence of article content).
-- Summarization is delegated to a dedicated utility function.
-- State persistence (mood) is simple but traceable.
-- Capabilities are declared via manifest introspection.
-- Execution is modular and interoperable with orchestration.
+- Inputs are explicitly validated to ensure content quality and prevent errors.
+- Summarization is modular and delegated to a utility layer.
+- All state changes (e.g., mood) are saved in JSON for transparency.
+- Only declared capabilities are exposed to the orchestrator.
+- Execution follows deterministic rules for auditable pipelines.
 
 Initial State:
-- `mood.json` exists or is initialized to default
-- `license_keys.json` contains a valid Mistral API key
 - `manifest.json` is present and valid
+- `mood.json` exists or is initialized to default mood
+- `license_keys.json` is present and contains a valid Mistral API key
+- The FastAPI server is launched and ready to accept orchestrated or manual requests
 
 Final State:
-- Agent responds to HTTP endpoints (/health, /capabilities, /summarize, /execute)
-- Mood is updated after summarization
-- Water usage is tracked and reported
+- Agent responds to all declared endpoints
+- Summarization is performed on input content and tracked
+- Mood state is updated and persisted
+- Waterdrop usage is tracked per summary and exposed via `/metrics`
 
 Version: 0.2.0
 Validated by: Olivier Hays
@@ -32,92 +33,62 @@ Date: 2025-06-16
 
 Estimated Water Cost:
 - 1 waterdrop per /health call
-- ~4 waterdrops per /summarize call (depends on number of articles)
+- ~4 waterdrops per /summarize call (variable per article count)
 - 0.02 waterdrops per /execute dispatch
 """
 
 # ----------- Imports ----------- #
 import json
+import time
 from fastapi import FastAPI, HTTPException, Request
 from tools.llm_utils import summarize_with_mistral
 
-# ----------- Internal State / License Loading ----------- #
+# ----------- Constants ----------- #
+AGENT_NAME = "summarize_articles"
+VERSION = "0.2.0"
+WATERDROP_ESTIMATE_PER_SUMMARY = 2
+
+# ----------- App Initialization ----------- #
+app = FastAPI(title="Summarize Articles Agent", version=VERSION)
+start_time = time.time()
+
+# ----------- Internal State / Registry ----------- #
 try:
-    with open("mood.json", "r") as f:
-        mood = json.load(f)
+    with open("mood.json", "r") as mood_json:
+        mood = json.load(mood_json)
 except FileNotFoundError:
     mood = {"status": "neutral", "last_summary": None}
 
 try:
-    with open("license_keys.json", "r") as f:
-        license_keys = json.load(f)
-except FileNotFoundError as e:
-    raise RuntimeError("Missing license_keys.json. Cannot proceed without license.") from e
+    with open("license_keys.json", "r") as license_json:
+        license_keys = json.load(license_json)
+except FileNotFoundError as license_error:
+    raise RuntimeError("Missing license_keys.json. Cannot proceed without license.") from license_error
 
-# ----------- App Initialization ----------- #
-app = FastAPI(title="Summarize Articles Agent", version="0.2.0")
-
-# ----------- API Endpoints ----------- #
-@app.get("/capabilities")
-def get_capabilities():
+# ----------- Helper Functions ----------- #
+def generate_summaries(payload: dict) -> dict:
     """
-    Returns the agent's manifest for orchestrator introspection.
-
-    Initial State:
-        - `manifest.json` is present and valid
-
-    Final State:
-        - Returns the parsed manifest as a dict
-
-    Raises:
-        FileNotFoundError: if manifest.json is missing
-    """
-    with open("manifest.json", "r") as f:
-        return json.load(f)
-
-
-@app.get("/health")
-def health():
-    """
-    Healthcheck endpoint.
-
-    Initial State:
-        - Agent is booted and `mood` is loaded
-
-    Final State:
-        - Returns basic status and mood
-
-    Water Cost:
-        - 1 waterdrop
-    """
-    return {"status": "Summarize Articles Agent is up.", "mood": mood.get("status", "unknown")}
-
-
-@app.post("/summarize")
-def summarize(payload: dict):
-    """
-    Summarizes a list of articles using the Mistral API.
+    Generates summaries for a batch of articles using the Mistral LLM.
 
     Parameters:
-        payload (dict): must contain a list of article dicts with a "content" field
+        payload (dict): A dictionary with either `articles` or `collection.items`
 
     Returns:
-        dict: summaries and total waterdrops consumed
+        dict: A dictionary containing the summaries and total waterdrops used
 
     Initial State:
         - Valid Mistral API key loaded
-        - Input contains at least one valid article with text content
+        - Input articles are provided in the expected format
 
     Final State:
-        - Summaries are returned
-        - Mood is updated and persisted
-        - Waterdrops are accumulated
+        - Each article is summarized
+        - Mood is updated and saved
 
     Raises:
-        HTTPException 400: if input is malformed or summarization fails
+        HTTPException: If input is invalid or summarization fails
 
     Water Cost:
-        - ~2 waterdrops per article
+        - 2 waterdrops per article (fixed estimate)
     """
     articles = payload.get("articles") or payload.get("collection", {}).get("items", [])
     summaries = []
@@ -132,72 +103,187 @@ def summarize(payload: dict):
                 article.get("content", ""),
                 license_keys.get("mistral", "")
             )
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to summarize article: {str(e)}")
+        except Exception as summarize_error:
+            raise HTTPException(status_code=400, detail=f"Failed to summarize article: {str(summarize_error)}")
 
         summaries.append(summary)
         waterdrops_used += waterdrops
 
-    # Update mood state
     mood["status"] = "active"
     mood["last_summary"] = summaries[-1] if summaries else None
 
-    with open("mood.json", "w") as f:
-        json.dump(mood, f)
+    with open("mood.json", "w") as file_out:
+        json.dump(mood, file_out)
 
     return {
         "summaries": summaries,
         "waterdrops_used": waterdrops_used
     }
 
+# ----------- API Endpoints ----------- #
 
-@app.post("/execute")
-async def execute(request: Request):
+@app.get("/manifest")
+def get_manifest() -> dict:
+    try:
+        with open("manifest.json", "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="manifest.json not found")
+
+@app.get("/health")
+def health() -> dict:
     """
-    Dispatcher endpoint for orchestrator execution.
-
-    Parameters:
-        request (Request): JSON with a 'capability' and 'input' field
+    Returns the health status of the agent.
 
     Returns:
-        dict: Result of dispatched capability
+        dict: Health status and current mood
 
     Initial State:
-        - Input payload contains valid capability and input
-        - Optional: summaries already precomputed (for structured output)
+        - Mood is loaded from internal state
 
     Final State:
-        - Dispatches to the correct internal capability function
-        - Returns structured result
-
-    Raises:
-        HTTPException 400: if unknown capability or invalid input
-        HTTPException 500: for internal execution errors
+        - Returns static health check message
 
     Water Cost:
-        - 0.02 base + cost of underlying function
+        - 1 waterdrop per call
+    """
+    return {"status": "Summarize Articles Agent is up.", "mood": mood.get("status", "unknown")}
+
+@app.get("/capabilities")
+def get_capabilities() -> dict:
+    """
+    Loads and returns only the list of declared capabilities from the manifest.
+
+    Returns:
+        dict: {"capabilities": [...]}
+
+    Initial State:
+        - manifest.json is present
+
+    Final State:
+        - Extracted list of capabilities is returned
+
+    Raises:
+        FileNotFoundError: If manifest is missing
+
+    Water Cost:
+        - 0
+    """
+    with open("manifest.json", "r") as manifest_json:
+        manifest = json.load(manifest_json)
+    return {"capabilities": manifest.get("capabilities", [])}
+
+@app.post("/summarize")
+def summarize(payload: dict) -> dict:
+    """
+    Executes direct summarization endpoint for manual testing or client use.
+
+    Parameters:
+        payload (dict): Articles to summarize
+
+    Returns:
+        dict: Summaries and waterdrops used
+
+    Initial State:
+        - Valid API key and content present
+
+    Final State:
+        - Summarization performed and mood updated
+
+    Water Cost:
+        - 2 waterdrops per article
+    """
+    return generate_summaries(payload)
+
+@app.post("/execute")
+async def execute(request: Request) -> dict:
+    """
+    Executes the agent's main capability: structured text summarization.
+
+    Parameters:
+        request (Request): Incoming POST request with 'capability' and 'input' fields
+
+    Returns:
+        dict: Structured summaries generated from the input articles
+
+    Initial State:
+        - A valid Mistral API key is loaded from license_keys.json
+        - The input contains either 'articles' or 'collection.items'
+
+    Final State:
+        - Articles are summarized
+        - Mood is updated and persisted
+        - Waterdrop usage is estimated and returned
+
+    Raises:
+        HTTPException: If capability is unrecognized or input is invalid
+        HTTPException: If an error occurs during summarization
+
+    Water Cost:
+        - ~2 waterdrops per article (LLM usage)
+        - +0.02 waterdrops per call (fixed dispatch overhead)
     """
     try:
         payload = await request.json()
         capability = payload.get("capability")
         input_data = payload.get("input", {})
 
-        if capability == "text_summarization":
-            return summarize(input_data)
-
-        elif capability == "structured_output_generation":
-            summaries = input_data.get("summaries")
-            if not summaries:
-                raise HTTPException(status_code=400, detail="Missing 'summaries' in input for structured output.")
-
-            return {
-                "summaries_structured": [
-                    {"summary": s, "format": "simple_text"} for s in summaries
-                ]
-            }
+        if capability == "structured_text_summarization":
+            return generate_summaries(input_data)
 
         else:
             raise HTTPException(status_code=400, detail=f"Unknown capability: {capability}")
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
+    except Exception as execution_error:
+        raise HTTPException(status_code=500, detail=f"Execution failed: {str(execution_error)}")
+
+@app.get("/metrics")
+def get_metrics() -> dict:
+    """
+    Returns runtime and usage metrics.
+
+    Returns:
+        dict: Agent version, uptime, mood, and estimated water usage
+
+    Initial State:
+        - Mood and uptime are tracked
+
+    Final State:
+        - Metrics report returned
+
+    Water Cost:
+        - 0
+    """
+    uptime = int(time.time() - start_time)
+    last_summary = mood.get("last_summary")
+    total_waterdrops = WATERDROP_ESTIMATE_PER_SUMMARY if last_summary else 0
+
+    return {
+        "agent": AGENT_NAME,
+        "version": VERSION,
+        "uptime_seconds": uptime,
+        "current_mood": mood.get("status", "unknown"),
+        "total_waterdrops_estimated": total_waterdrops
+    }
+
+@app.get("/mood")
+def get_mood() -> dict:
+    """
+    Retrieves current mood and last summary from memory.
+
+    Returns:
+        dict: Mood and last summary state
+
+    Initial State:
+        - mood.json loaded at startup
+
+    Final State:
+        - Mood data returned without change
+
+    Water Cost:
+        - 0
+    """
+    return {
+        "current_mood": mood.get("status", "unknown"),
+        "last_summary": mood.get("last_summary")
+    }

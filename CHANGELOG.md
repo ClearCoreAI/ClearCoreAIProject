@@ -5,9 +5,36 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.2.0] - 2025-06-18
+
+**Expanded agent capabilities and improved orchestration logic**
+
+### Added
+
+- New capability `structured_output_generation` to `summarize_articles`
+- New capability `generate_article_collection` to `fetch_articles`
+- Support for multi-capability handling in `/execute` endpoint of both agents
+- Full compatibility check between agents via `input_spec` and `output_spec`
+- Enhanced traceability in `/execute_plan` with improved execution logging
+- Natural language goal-to-plan generation via Mistral LLM API
+- New route `/run_goal` to automate planning + execution
+
+### Changed
+
+- Orchestrator now uses `/manifest` instead of `/capabilities` for agent validation
+- Updated `manifest_template.json` schema accordingly
+- Refined error handling during agent registration and execution
+
+### Documentation
+
+- Updated `README.md` for `fetch_articles`, `summarize_articles`, and the orchestrator with all current capabilities, usage, and endpoints
+- Reorganized explanations for better developer onboarding
+
+---
+
 ## [0.1.0] - 2025-06-13
 
-**Initial Manifest Ready release 🚀**
+**Initial Manifest Ready release**
 
 ### Added
 

@@ -68,10 +68,19 @@ def summarize_with_mistral(article_text: str, api_key: str) -> tuple[str, int]:
         payload = {
             "model": "mistral-small",
             "messages": [
-                {"role": "system", "content": "You are a professional summarizer."},
-                {"role": "user", "content": f"Summarize this article:\n{article_text}"}
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a summarization assistant. Given an article, your job is to return **a single sentence summary**, "
+                        "in clear English, no more than 25 words. Do not include details or examples."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": f"Article:\n{article_text}\n\nSummary:"
+                }
             ],
-            "temperature": 0.7
+            "temperature": 0.3  # plus faible pour éviter les extrapolations
         }
 
         response = requests.post(mistral_endpoint, headers=headers, json=payload)

@@ -21,6 +21,23 @@
           },
           "required": ["content"]
         }
+      },
+      "collection": {
+        "type": "object",
+        "description": "Optional fallback input with articles as 'items'.",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": { "type": "string" },
+                "content": { "type": "string" }
+              },
+              "required": ["content"]
+            }
+          }
+        }
       }
     },
     "required": ["articles"]
@@ -56,8 +73,7 @@
   },
 
   "capabilities": [
-    "text_summarization",
-    "structured_output_generation"
+    "structured_text_summarization"
   ],
 
   "required_dependencies": [

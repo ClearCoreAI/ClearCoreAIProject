@@ -1,42 +1,75 @@
 # ClearCoreAI Agent: summarize_articles
 
-**Version:** 0.1.0  
-**Last Updated:** 2025-06-15  
+**Version:** 0.2.0  
+**Last Updated:** 2025-06-18  
 **Validated by:** Olivier Hays  
 
 ---
 
 ## Overview
 
-The `summarize_articles` agent is part of the ClearCoreAI modular architecture.  
-It is responsible for **summarizing text-based articles** using a language model like **Mistral AI**.
+`summarize_articles` is a ClearCoreAI-compatible agent that summarizes input articles using the Mistral LLM API.  
+It tracks internal mood, reports energy usage (in waterdrops), and exposes a structured capability for orchestrator use.
 
-**Key features:**
-
-✅ LLM-based article summarization  
-✅ Dynamic API powered by FastAPI  
-✅ Waterdrop consumption tracking  
-✅ Mood status tracking with `mood.json`  
-✅ Designed for plug-and-play with ClearCoreAI Orchestrator  
+- LLM summarization via Mistral API  
+- Mood state persistence (`mood.json`)  
+- Waterdrop consumption tracking  
+- Declarative orchestration via `/execute`  
+- Structured capability: `structured_text_summarization`
 
 ---
 
 ## Endpoints
 
-### /health
+### `GET /health`
 
-Returns the current health and mood status of the summarize agent.
+Returns agent status and current mood.  
+Water cost: 1 waterdrop
 
-### /summarize
+---
 
-Accepts a JSON payload of articles and returns a list of summaries.  
-Example:
+### `GET /capabilities`
+
+Returns the list of capabilities declared in `manifest.json`.
+
+---
+
+### `GET /metrics`
+
+Returns:
+
+- agent name and version  
+- uptime  
+- current mood  
+- estimated waterdrops consumed
+
+---
+
+### `GET /mood`
+
+Returns:
+
+- current mood  
+- last summarized content
+
+---
+
+### `GET /manifest`
+
+Returns the full agent manifest.
+
+---
+
+### `POST /summarize`
+
+Summarizes a list of articles using the Mistral API.  
+Payload format:
 
 ```json
 {
   "articles": [
-    "First article full text goes here...",
-    "Second article full text goes here..."
+    {"title": "Optional", "content": "Text to summarize"},
+    ...
   ]
 }
 ```
@@ -45,16 +78,53 @@ Returns:
 
 ```json
 {
-  "summaries": ["Summary 1", "Summary 2"],
-  "waterdrops_used": 7
+  "summaries": ["summary1", "summary2", ...],
+  "waterdrops_used": <int>
 }
 ```
+
+Water cost: ~2 waterdrops per article
+
+---
+
+### `POST /execute`
+
+Used by the orchestrator to call the main capability.  
+Accepted payload:
+
+```json
+{
+  "capability": "structured_text_summarization",
+  "input": { ... }
+}
+```
+
+Returns:
+
+```json
+{
+  "summaries": [...],
+  "waterdrops_used": <int>
+}
+```
+
+Water cost: 0.02 fixed + ~2 per article
+
+---
+
+## Capabilities
+
+- `structured_text_summarization`:  
+  Summarizes a list of articles provided in either:
+  - `articles` field  
+  - `collection.items` field  
+  Returns a structured JSON response.
 
 ---
 
 ## Usage
 
-Start the agent with:
+Start agent with Docker Compose:
 
 ```bash
 docker compose up --build
@@ -63,27 +133,24 @@ docker compose up --build
 Or manually:
 
 ```bash
-docker build -t ClearCoreAIProject-summarize .
-docker run -p 8001:8000 ClearCoreAIProject-summarize
+docker build -t summarize_articles_agent .
+docker run -p 8600:8600 summarize_articles_agent
 ```
 
 ---
 
-## Agent Configuration
+## Required files
 
-This agent requires:
+Ensure the following files exist before startup:
 
-- A valid API key in `license_keys.json`
-- An initial `mood.json` configuration
-- LLM utilities under `tools/llm_utils.py`
+- `manifest.json` → capability declaration  
+- `mood.json` → persistent agent state  
+- `license_keys.json` → must contain valid `mistral` API key  
 
 ---
 
 ## License
 
-Licensed under MIT License.
+Licensed under the MIT License.
 
 ---
-
-# ✨ Empower your AI pipeline with summarization!
-ClearCoreAI Team

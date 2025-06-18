@@ -1,103 +1,118 @@
+# ClearCoreAI Core Orchestrator
 
-ClearCoreAI Orchestrator
-=========================
-
-Version: 0.1.0  
-Last Updated: 2025-06-15  
-Validated by: Olivier Hays  
+**Version:** 0.3.0  
+**Last Updated:** 2025-06-18  
+**Validated by:** Olivier Hays  
 
 ---
 
-Overview
---------
+## Overview
 
-The ClearCoreAI Orchestrator is the central component of the ClearCoreAI architecture.  
-It provides transparent and auditable orchestration of modular AI agents running as independent containers.
+The ClearCoreAI orchestrator acts as the central controller of the agent ecosystem.  
+It manages agent registration, capability discovery, compatibility analysis, plan generation, and multi-agent execution.
 
-Key features:
-
-- Agent registration & discovery
-- Dynamic manifest validation
-- Dynamic capability & dependency mapping
-- Global orchestrator metrics
-- Global orchestrator mood tracking
-- Designed for modularity, observability & security
+- agent registration and manifest validation  
+- dynamic compatibility checks between agents  
+- natural language goal → execution plan (via Mistral LLM)  
+- traceable execution of multi-step plans  
+- internal memory and persistent agent registry  
 
 ---
 
-Endpoints
----------
+## Endpoints
 
-### /health
-Check the orchestrator's health status.
-
-### /register_agent
-Register an AI agent.
-
-Request body must include:
-{
-    "agent_name": "...",
-    "version": "...",
-    "url": "http://agent-container:port"
-}
-
-This endpoint also triggers validation of the agent's manifest against the common template.
-
-### /agents
-List all registered agents.
-
-### /agents/metrics
-Aggregate /metrics from all registered agents.
-
-### /metrics
-Show orchestrator's own metrics:
-- Uptime
-- Registered agents count
-- Total AIWaterdrops consumed
-
-### /mood
-Read orchestrator's mood (stored in mood.json).
+### `GET /health`
+Returns basic orchestrator status and list of registered agents.  
+Water cost: free
 
 ---
 
-Architecture
-------------
-
-The orchestrator:
-- Maintains a central registry (`agents.json`)
-- Reads and validates agent manifests dynamically
-- Aligns each agent's declared capabilities and dependencies with system-level needs
-- Uses a unified `manifest_template.json` to ensure conformity and interoperability
+### `POST /register_agent`
+Registers a new agent by validating its `/manifest`.  
+Water cost: 0.2 waterdrops
 
 ---
 
-Usage
------
-
-To start the orchestrator:
-
-Via Docker Compose:
-    docker compose up --build
-
-Or inside the orchestrator folder:
-    docker build -t clearcoreai-orchestrator .
-    docker run -p 8000:8000 clearcoreai-orchestrator
+### `GET /agents`
+Returns all registered agents and their declared capabilities.  
+Water cost: 0.05 waterdrops
 
 ---
 
-Roadmap
--------
-
-See ROADMAP.md for future features and versioning milestones.
-
----
-
-License
--------
-
-Licensed under MIT License.
+### `GET /agent_manifest/{agent_name}`
+Returns the full manifest for a specific agent.  
+Useful for debugging or capability checks.
 
 ---
 
-Let's orchestrate AI agents transparently and responsibly.  
-— ClearCoreAI Team
+### `GET /agents/connections`
+Analyzes I/O compatibility between agents.  
+Water cost: free (uses internal manifests)
+
+---
+
+### `GET /agents/metrics`
+Fetches live `/metrics` data from each agent.  
+Useful for centralized monitoring.
+
+---
+
+### `GET /agents/raw`
+Returns all raw manifests currently stored.  
+Water cost: free
+
+---
+
+### `POST /plan`
+Generates a step-by-step execution plan from a user goal.  
+Internally uses the Mistral LLM API.  
+Water cost: 3 waterdrops
+
+---
+
+### `POST /execute_plan`
+Executes a provided plan string across agents sequentially.  
+Returns full trace of execution with context forwarding.
+
+---
+
+### `POST /run_goal`
+Generates a plan and executes it in one shot.  
+Water cost: 3 waterdrops
+
+---
+
+## File Structure
+
+- `main.py` → orchestrator API server  
+- `agents.json` → persistent memory of registered agents  
+- `manifest_template.json` → schema used for manifest validation  
+- `license_keys.json` → contains API keys (e.g. for Mistral)  
+
+---
+
+## Usage
+
+Run the orchestrator locally:
+
+```bash
+uvicorn main:app --reload
+```
+
+Or with Docker:
+
+```bash
+docker build -t clearcore_orchestrator .
+docker run -p 8000:8000 clearcore_orchestrator
+```
+
+---
+
+## License
+
+Licensed under the MIT License.
+
+---
+
+Clear orchestration. Auditable agents. Transparent AI.  
+ClearCoreAI Team

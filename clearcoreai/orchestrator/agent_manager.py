@@ -22,7 +22,7 @@ Estimated Water Cost:
 """
 
 from models.agent_model import AgentInfo
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict
 
 class AgentManager:
@@ -85,7 +85,7 @@ class AgentManager:
             agent_name=agent_name,
             version=version,
             url=url,
-            registered_at=datetime.utcnow(),
+            registered_at=datetime.now(timezone.utc),
             aiwaterdrops_consumed=0.0,
             last_known_mood=None
         )

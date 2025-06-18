@@ -1,174 +1,116 @@
+# ClearCoreAI Orchestrator – Test Plan
 
-# ClearCoreAI - TEST PLAN v0.1.0
-
-This document describes how to test the ClearCoreAI orchestrator and agents.
-
-**Version:** 0.1.0  
-**Last Updated:** 2025-06-13  
+**Version:** 0.3.0  
+**Last Updated:** 2025-06-18  
 **Validated by:** Olivier Hays  
 
 ---
 
-## Testing Environment
+## 🧪 Objectives
 
-- Orchestrator exposed on `http://localhost:8000`
-- Agent `fetch_articles` exposed on `http://localhost:8500`
-- Containers started with:
-
-```
-docker compose up --build
-```
-
----
-
-## 1️⃣ Orchestrator Endpoints
-
-### /health
-
-```
-GET http://localhost:8000/health
-```
-
-✅ Expect:
-
-```
-{ "status": "ClearCoreAI orchestrator is up and running." }
-```
+- Ensure reliability of agent registration and validation
+- Verify compatibility detection between agents
+- Confirm correct execution of multi-step plans
+- Monitor robustness against invalid input and offline agents
+- Validate API stability and consistent waterdrop tracking
+- Ensure structured outputs and cost estimates align with agent specs
 
 ---
 
-### /register_agent
+## 🔁 Test Scenarios
 
-```
-POST http://localhost:8000/register_agent
-Content-Type: application/json
+### ✅ Agent Registration
 
-Body:
-{
-    "agent_name": "fetch_articles",
-    "version": "0.1.0",
-    "url": "http://fetch_articles_agent:8500"
-}
-```
-
-✅ Expect:
-
-```
-{ "message": "Agent 'fetch_articles' registered successfully." }
-```
+**Endpoint:** `POST /register_agent`  
+- [ ] Valid manifest registers correctly  
+- [ ] Invalid manifest is rejected  
+- [ ] Offline agent triggers connection error  
+- [ ] Duplicate agent names overwrite or raise conflict  
 
 ---
 
-### /agents
+### ✅ Capability Discovery
 
-```
-GET http://localhost:8000/agents
-```
-
-✅ Expect: list of registered agents with AgentInfo structure.
-
----
-
-### /agents/metrics
-
-```
-GET http://localhost:8000/agents/metrics
-```
-
-✅ Expect: aggregated agents metrics, pulling `/metrics` from each agent.
+**Endpoint:** `GET /agents`, `GET /agent_manifest/{agent_name}`  
+- [ ] Registered agent exposes correct capabilities  
+- [ ] Manifest matches agent's declared capabilities  
+- [ ] Raw manifests are correctly served via `/agents/raw`  
+- [ ] 404 is returned for unknown agent name  
 
 ---
 
-### /metrics (Orchestrator)
+### ✅ Plan Generation
 
-```
-GET http://localhost:8000/metrics
-```
-
-✅ Expect: orchestrator uptime, number of agents, total AIWaterdrops consumed.
-
----
-
-### /mood (Orchestrator)
-
-```
-GET http://localhost:8000/mood
-```
-
-✅ Expect: current mood and history from orchestrator `mood.json`.
+**Endpoint:** `POST /plan`  
+- [ ] Valid goal returns non-empty plan  
+- [ ] Invalid goal or empty agent list returns error  
+- [ ] LLM output follows strict step-by-step format  
+- [ ] Only registered agents and capabilities appear  
+- [ ] Water cost is recorded as 3 waterdrops  
 
 ---
 
-## 2️⃣ Agent `fetch_articles` Endpoints
+### ✅ Plan Execution
 
-### /health
-
-```
-GET http://localhost:8500/health
-```
-
-✅ Expect: agent healthy.
-
----
-
-### /metrics
-
-```
-GET http://localhost:8500/metrics
-```
-
-✅ Expect: agent uptime, AIWaterdrops consumed, current mood.
+**Endpoint:** `POST /execute_plan`  
+- [ ] All agents in plan are reachable  
+- [ ] Unknown agents trigger structured error  
+- [ ] Execution trace includes all steps and outputs  
+- [ ] Final output is returned and conforms to `output_spec`  
+- [ ] Per-agent `waterdrops_used` values match manifest cost  
 
 ---
 
-### /mood
+### ✅ Combined Execution
 
-```
-GET http://localhost:8500/mood
-```
-
-✅ Expect: agent `mood.json` current mood and history.
-
----
-
-### /get_articles
-
-```
-GET http://localhost:8500/get_articles
-```
-
-✅ Expect: list of example articles in JSON.
-
-⚠️ Verify:
-
-- AIWaterdrops consumed increases after each `/get_articles` call.
-- Check with `/metrics` before and after `/get_articles`.
+**Endpoint:** `POST /run_goal`  
+- [ ] Generates and executes plan in one shot  
+- [ ] Waterdrop cost and full trace are returned  
+- [ ] Output includes summaries and optional structured summaries  
+- [ ] Error trace is returned if any step fails  
 
 ---
 
-## Recommended Testing Order
+### ✅ Health and Monitoring
 
-1. Start containers:
-
-```
-docker compose up --build
-```
-
-2. Verify orchestrator `/health`.
-3. Register agent with `/register_agent`.
-4. Verify `/agents`.
-5. Test `/agents/metrics`.
-6. Test `/metrics` and `/mood` orchestrator.
-7. Verify agent `/health`, `/metrics`, `/mood`, `/get_articles`.
+**Endpoint:** `GET /health`, `GET /metrics`  
+- [ ] Returns orchestrator status and agent list  
+- [ ] Metrics from agents are correctly aggregated  
+- [ ] Handles slow or non-responsive agents gracefully  
 
 ---
 
-## Notes
+## ⚠️ Edge Cases
 
-✅ This test plan covers functional testing of the ClearCoreAI architecture v0.1.0.  
-✅ Advanced features (auto mood update, unregister agent, memory management) planned for future versions.
+- [ ] Manifest file missing or corrupted  
+- [ ] Agent changes capabilities after registration  
+- [ ] Agent manifest lacks required input/output spec  
+- [ ] LLM returns malformed plan  
+- [ ] Agent returns invalid JSON or fails mid-plan  
+- [ ] Circular dependencies in future DAGs (non-linear plans)  
 
 ---
 
-# Happy Testing 🚀  
-ClearCoreAI Team
+## 🧾 Reporting
+
+- All test results should be logged in `tests/results/`  
+- Failures must include HTTP code, error message, and offending input  
+- Include waterdrop accounting per test to detect leaks  
+- Validate per-agent runtime behavior against declared manifest  
+
+---
+
+## ✅ Coverage Target
+
+Minimum 90% for:
+
+- Agent lifecycle  
+- API responses  
+- Error handling  
+- Plan consistency  
+- Compliance with manifest specs  
+
+---
+
+# 🔬 Let’s ensure the orchestrator is as reliable as it is transparent.  
+ClearCoreAI QA Team

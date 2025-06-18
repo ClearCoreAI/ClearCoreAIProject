@@ -1,102 +1,86 @@
+# ClearCoreAI Orchestrator – Roadmap
 
-# ClearCoreAI - ROADMAP
-
-**Version:** 0.1.0  
-**Last Updated:** 2025-06-13  
-**Validated by:** Olivier Hays  
-
----
-
-## Vision
-
-ClearCoreAI aims to provide a **transparent, robust, modular, and auditable orchestration framework for AI agents**.  
-The architecture enables AI agents to be deployed as isolated containers, monitored centrally, and fully traceable (AIWaterdrops tracking, mood, metrics).
+**Current Version:** 0.3.0  
+**Maintainer:** Olivier Hays  
+**Last Updated:** 2025-06-16
 
 ---
 
-## v0.1.0 - Initial Public Release
+## ✅ Completed Milestones
 
-✅ Core orchestrator with:  
-- /health  
-- /register_agent  
-- /agents  
-- /agents/metrics  
-- /metrics  
-- /mood  
-
-✅ Example agent `fetch_articles` with:  
-- /health  
-- /metrics  
-- /mood  
-- /get_articles  
-- agent_manifest.json  
-- mood.json  
-- license_keys.json.template  
-- AIWaterdrops tracking persisted
-
-✅ Documentation:  
-- README.md  
-- TEST_PLAN.md  
-- CONTRIBUTING.md  
+- Agent registration and manifest validation
+- Capability discovery via `/capabilities`
+- Planning via LLM (Mistral)
+- Sequential execution across agents
+- Context propagation between steps
+- Waterdrop-based energy accounting
+- Mood and metric tracking
+- Agent introspection and orchestration readiness
+- FastAPI-based modular orchestrator
 
 ---
 
-## v0.2.0 - Next Iteration
+## 🧭 Upcoming Features
 
-🟡 Orchestrator:  
-- [ ] Add `/unregister_agent` endpoint  
-- [ ] Add `/update_agent` endpoint (update URL or version)  
-- [ ] Add auto-mood calculation for orchestrator mood based on agents state  
-- [ ] Add API key / token based security for orchestrator endpoints (optional for enterprise use)
+### 🔍 Reduce Hallucinations
+- Constraint-based planning using schemas and hard type-checking
+- LLM guardrails and manifest-only reasoning
+- Add validation layers pre- and post-agent calls
 
-🟡 Agents:  
-- [ ] Add `/update_mood` endpoint to agents  
-- [ ] Standardize `utils.py` for mood + license + manifest loading  
-- [ ] Add example agent with LLM integration (OpenAI or Mistral API)  
-- [ ] Add agent status file or database (optional)
+### 📚 Automated Documentation
+- Auto-generate `README.md` and inline docstrings from manifests and code
+- CLI tool: `ccai docgen`
+- Support multilingual comments
 
-🟡 DevOps:  
-- [ ] Add CI/CD GitHub Actions basic pipeline (lint, test build)  
-- [ ] Provide example production Docker Compose template  
-- [ ] Publish first tagged release on GitHub
+### 🧪 Agent Auditor
+- Dedicated agent to verify execution outputs from other agents
+- Compares declared vs. observed behaviors
+- Provides audit trails and exception scoring
 
----
+### 🔀 Non-Linear Pipelines (Graph Execution)
+- Support for DAG-style agent workflows
+- Visual editor for agent graphs
+- Intelligent routing based on capabilities and data types
 
-## v0.3.0 - Extended Ecosystem
+### 📈 Performance Tracing
+- End-to-end latency and cost reporting
+- Per-agent and per-capability stats
+- Optional logging to external tools (e.g., Prometheus, OpenTelemetry)
 
-🟢 Orchestrator:  
-- [ ] Dashboard UI basic prototype (VueJS or React) to visualize agents / metrics / mood  
-- [ ] Add `global_mood_rules.json` configurable per orchestrator  
-- [ ] Multi-tenancy / multi-orchestrator support (design level)  
+### 🔐 Encrypted Inter-Agent Communication
+- Encrypt data payloads exchanged between agents
+- Support both symmetric and asymmetric encryption
+- Configurable per agent or per pipeline
 
-🟢 Agents:  
-- [ ] Add example agent with image generation capabilities  
-- [ ] Add example agent with RAG (Retrieval Augmented Generation) support  
-- [ ] Provide agent template generator CLI (scaffold new agents)  
+### 💧 Improved AIWaterdrops Calculation
+- Refine granularity of waterdrop estimation per capability
+- Track cumulative and peak consumption per agent and per session
+- Introduce configurable cost models (e.g., based on payload size, latency, or token usage)
+- Expose detailed consumption via /metrics and optional billing module
 
-🟢 Community & Ecosystem:  
-- [ ] Setup GitHub Discussions  
-- [ ] Setup GitHub Pages mini site (docs, roadmap, architecture diagram)  
-- [ ] Start collecting community-contributed agents  
+### 🌐 Agent Visualization UI
+- Web dashboard showing:
+  - Active agents
+  - Live executions
+  - Graph-based pipeline view
+  - Mood, metrics, and waterdrop usage
 
----
-
-## Longer-Term Ideas
-
-- AI agents with internal memory / personality evolutions  
-- Agent-to-agent secure messaging (zero-trust model)  
-- AI agents capable of auditing themselves  
-- Advanced AIWaterdrops metering (multi-dimension: CPU, GPU, memory, latency)  
-- Publish to PyPI: `clearcoreai` framework helpers (orchestrator + agent utilities)  
-
----
-
-## Summary
-
-ClearCoreAI v0.1.0 sets the foundation for a modular and auditable AI agent orchestration system.  
-This roadmap ensures a progressive, community-friendly, transparent evolution of the framework.
+### 🧠 Autonomous Agent Generation
+- High-level goal → agent scaffold
+- Auto-generate manifest, endpoints, stubs
+- Use LLMs and context-aware templates
 
 ---
 
-# 🚀 Let's build it together!  
+## 📌 Notes
+
+- All features will respect the ClearCoreAI design principles:
+  - Transparency
+  - Auditable behaviors
+  - Declarative orchestration
+  - Modular, agent-based architecture
+
+---
+
+# 🛠 Help us build the future of explainable orchestration  
 ClearCoreAI Team
