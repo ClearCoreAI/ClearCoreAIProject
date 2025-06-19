@@ -33,7 +33,7 @@ Date: 2025-06-16
 
 Estimated Water Cost:
 - 1 waterdrop per /health call
-- ~4 waterdrops per /summarize call (variable per article count)
+- ~2 waterdrops per /summarize call (variable per article count)
 - 0.02 waterdrops per /execute dispatch
 """
 
@@ -145,7 +145,7 @@ def health() -> dict:
         - Returns static health check message
 
     Water Cost:
-        - 1 waterdrop per call
+        - 0 waterdrop per call
     """
     return {"status": "Summarize Articles Agent is up.", "mood": mood.get("status", "unknown")}
 

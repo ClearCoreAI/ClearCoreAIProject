@@ -51,12 +51,13 @@ AGENTS_FILE = ROOT / "agents.json"
 TEMPLATE_FILE = ROOT / "manifest_template.json"
 AGENT_DIR = ROOT / "agents"
 LICENSE_FILE = ROOT / "license_keys.json"
+VERSION = "0.3.0"
 
 # ----------- FastAPI App ----------- #
 app = FastAPI(
     title="ClearCoreAI Orchestrator",
     description="Central hub for registering and connecting ClearCoreAI agents.",
-    version="0.3.0"
+    version=VERSION
 )
 
 # ----------- In-Memory Agent Registry ----------- #

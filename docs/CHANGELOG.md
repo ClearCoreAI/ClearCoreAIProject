@@ -68,13 +68,4 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - `.gitignore` optimized for Python + PyCharm + VSCode + ClearCoreAI-specific folders
 
----
-
-## Upcoming
-
-- Advanced orchestrator dashboard
-- Web UI for agent management
-- Advanced AIWaterdrops calculation and visualisation
-- Additional example agents
-- Shared memory integration (Neo4j live API)
-- Agent orchestration scenarios
+👉 For upcoming features and roadmap, see `docs/ROADMAP.md`.

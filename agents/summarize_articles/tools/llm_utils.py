@@ -47,7 +47,6 @@ def summarize_with_mistral(article_text: str, api_key: str) -> tuple[str, int]:
     Final State:
         - Mistral is called with the article text
         - A summary is returned (stripped and clean)
-        - Water cost is fixed at 2 drops per summarization
 
     Raises:
         ValueError: If the input text is empty or not a string
@@ -80,7 +79,7 @@ def summarize_with_mistral(article_text: str, api_key: str) -> tuple[str, int]:
                     "content": f"Article:\n{article_text}\n\nSummary:"
                 }
             ],
-            "temperature": 0.3  # plus faible pour éviter les extrapolations
+            "temperature": 0.3
         }
 
         response = requests.post(mistral_endpoint, headers=headers, json=payload)

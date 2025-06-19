@@ -31,7 +31,7 @@ Date: 2025-06-18
 
 Estimated Water Cost:
 - 1 waterdrop per /health call
-- 3 waterdrops per /get_articles call
+- 1 waterdrops per /get_articles call
 - 0.02 waterdrops per /execute call
 """
 
@@ -50,6 +50,7 @@ AGENT_NAME = "fetch_articles"
 START_TIME = time.time()
 AIWATERDROPS_FILE = Path("memory/short_term/aiwaterdrops.json")
 ARTICLES_DIR = Path("memory/long_term/")
+VERSION = "0.2.0"
 
 # ----------- Internal State ----------- #
 with open("mood.json", "r") as mood_file:
@@ -62,7 +63,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Fetch Articles Agent", version="0.2.2", lifespan=lifespan)
+app = FastAPI(title="Fetch Articles Agent", version=VERSION, lifespan=lifespan)
 
 # ----------- State Management ----------- #
 def load_aiwaterdrops() -> float:
@@ -126,7 +127,7 @@ def fetch_static_articles() -> dict:
         - Structured articles are returned
 
     Water Cost:
-        - 3 (in /get_articles) or 0.02 (in /execute)
+        - 1 (in /get_articles) or 0.02 (in /execute)
     """
     articles = []
     for file_path in sorted(ARTICLES_DIR.glob("*.txt")):
@@ -193,8 +194,6 @@ def register_with_orchestrator() -> None:
     """
     time.sleep(2)
     try:
-        with open("manifest.json", "r") as f:
-            manifest = json.load(f)
         payload = {
             "name": AGENT_NAME,
             "base_url": f"http://localhost:8500"
@@ -240,7 +239,7 @@ def get_metrics() -> dict:
 @app.get("/get_articles")
 def get_articles() -> dict:
     global aiwaterdrops_consumed
-    aiwaterdrops_consumed += 3
+    aiwaterdrops_consumed += 1
     save_aiwaterdrops(aiwaterdrops_consumed)
     return fetch_static_articles()
 
