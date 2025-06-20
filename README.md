@@ -1,108 +1,155 @@
-# ClearCoreAI Core Orchestrator
+# 🚀 ClearCoreAI — Core Orchestrator
 
-Version: 0.3.1  
-Last Updated: 2025-06-20  
-Validated by: Olivier Hays  
+**Version:** 0.3.2  
+**Last Updated:** 2025-06-20  
+**Validated by:** Olivier Hays  
 
----
-
-## Overview
-
-The ClearCoreAI orchestrator acts as the central controller of the agent ecosystem.  
-It manages agent registration, capability discovery, compatibility analysis, plan generation, and multi-agent execution.
-
-Features:
-
-- Agent registration and manifest validation  
-- Dynamic compatibility checks between agents  
-- Natural language goal → execution plan (via Mistral LLM)  
-- Traceable execution of multi-step plans  
-- Internal memory and persistent agent registry  
-- Waterdrop metering for energy transparency
+👉 New here? Check out the [Quickstart Guide](docs/QUICKSTART.md) to get up and running fast.
 
 ---
 
-## Endpoints
+## 🔍 Overview
 
-### GET /health  
-Returns basic orchestrator status and list of registered agents.  
-Water cost: free
+The **ClearCoreAI Orchestrator** is the beating heart of a modular, explainable and fully auditable AI system.  
+It connects and coordinates a swarm of autonomous agents, turning natural language instructions into traceable, multi-step execution plans.
 
-### POST /register_agent  
-Registers a new agent by validating its /manifest.  
-Water cost: 0.2 waterdrops
+Whether you're building a research prototype or an industrial AI pipeline, ClearCoreAI gives you:
 
-### GET /agents  
-Returns all registered agents and their declared capabilities.  
-Water cost: 0.05 waterdrops
+- ✅ Dynamic agent registration & manifest validation  
+- 🔁 Automated compatibility checks between agents  
+- 🧠 Natural language planning (via Mistral LLM)  
+- 📊 Transparent tracking of energy usage (in waterdrops)  
+- 📂 Persistent memory for reproducible orchestration  
 
-### GET /agent_manifest/{agent_name}  
-Returns the full manifest for a specific agent.  
-Useful for debugging or capability checks.  
-Water cost: free
-
-### GET /agents/connections  
-Analyzes I/O compatibility between agents.  
-Water cost: free (uses internal manifests)
-
-### GET /agents/metrics  
-Fetches live /metrics data from each agent.  
-Useful for centralized monitoring.  
-Water cost: free
-
-### GET /agents/raw  
-Returns all raw manifests currently stored.  
-Water cost: free
-
-### POST /plan  
-Generates a step-by-step execution plan from a user goal.  
-Internally uses the Mistral LLM API.  
-Water cost: 3 waterdrops
-
-### POST /execute_plan  
-Executes a provided plan string across agents sequentially.  
-Returns full trace of execution with context forwarding.  
-Water cost: 0.02 base + dynamic per agent execution
-
-### POST /run_goal  
-Generates a plan and executes it in one shot.  
-Water cost: ~3 waterdrops (same as /plan + /execute_plan)
-
-### GET /water/total  
-Returns the total waterdrop consumption across orchestrator and all registered agents.  
-Breaks down usage per component.  
-Water cost: free
+Built with transparency, modularity and developer joy in mind.  
 
 ---
 
-## File Structure
+## 🌐 API Endpoints
 
-- main.py → orchestrator API server  
-- agents.json → persistent memory of registered agents  
-- manifest_template.json → schema used for manifest validation  
-- license_keys.json → contains API keys (e.g. for Mistral)  
-- memory/short_term/aiwaterdrops.json → orchestrator water usage log
+### `GET /health`  
+Check orchestrator status and list current agents.  
+Water cost: **0**
 
 ---
 
-## Usage
-
-Run the orchestrator locally:
-
-    uvicorn main:app --reload
-
-Or with Docker:
-
-    docker build -t clearcore_orchestrator .
-    docker run -p 8000:8000 clearcore_orchestrator
+### `POST /register_agent`  
+Register a new agent by validating its `/manifest`.  
+Water cost: **0.2**
 
 ---
 
-## License
-
-Licensed under the MIT License.
+### `GET /agents`  
+List all registered agents and their capabilities.  
+Water cost: **0.05**
 
 ---
 
-Clear orchestration. Auditable agents. Transparent AI.  
-ClearCoreAI Team
+### `GET /agent_manifest/{agent_name}`  
+Get the full manifest of a specific agent.  
+Water cost: **0**
+
+---
+
+### `GET /agents/connections`  
+Detect compatible I/O between agents.  
+Water cost: **0**
+
+---
+
+### `GET /agents/metrics`  
+Collect live `/metrics` from all agents.  
+Water cost: **0**
+
+---
+
+### `GET /agents/raw`  
+Return raw manifests of all registered agents.  
+Water cost: **0**
+
+---
+
+### `POST /plan`  
+Generate a multi-step execution plan from a natural language goal.  
+Water cost: **3**
+
+---
+
+### `POST /execute_plan`  
+Execute a given plan string across agents.  
+Water cost: **0.02 + dynamic agent cost**
+
+---
+
+### `POST /run_goal`  
+Generate and run a plan in one request (auto pipeline).  
+Water cost: **~3**
+
+---
+
+### `GET /water/total`  
+Get total waterdrop consumption across orchestrator and agents.  
+Water cost: **0**
+
+---
+
+## ▶️ Getting Started
+
+Run locally:
+
+```bash
+uvicorn main:app --reload
+```
+
+Or using Docker:
+
+```bash
+docker build -t clearcore_orchestrator .
+docker run -p 8000:8000 clearcore_orchestrator
+```
+
+Once running, register agents and launch your goals!
+
+---
+
+## 🧪 Example Usage
+
+**Register an agent:**
+
+```bash
+curl -X POST http://localhost:8000/register_agent \
+  -H "Content-Type: application/json" \
+  -d '{"name": "fetch_articles", "base_url": "http://fetch_articles_agent:8500"}' | jq
+```
+
+**Run a full pipeline:**
+
+```bash
+curl -X POST http://localhost:8000/run_goal \
+  -H "Content-Type: application/json" \
+  -d '{"goal": "fetch articles and summarize them"}' | jq
+```
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions to make ClearCoreAI even better!
+
+- Fork the repo
+- Follow the docstring and commenting conventions
+- Respect waterdrop accounting in every route
+- Keep it modular and readable
+
+You can also check the [ROADMAP](docs/ROADMAP.md) and [CHANGELOG](CHANGELOG.md) for ideas.
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License.
+
+---
+
+**Clear orchestration. Auditable agents. Transparent AI.**  
+*– The ClearCoreAI Team*
