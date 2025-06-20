@@ -27,9 +27,9 @@ Final State:
 - Mood state is updated and persisted
 - Waterdrop usage is tracked per summary and exposed via `/metrics`
 
-Version: 0.2.0
+Version: 0.2.1
 Validated by: Olivier Hays
-Date: 2025-06-16
+Date: 2025-06-20
 
 Estimated Water Cost:
 - 1 waterdrop per /health call
@@ -42,28 +42,34 @@ import json
 import time
 from fastapi import FastAPI, HTTPException, Request
 from tools.llm_utils import summarize_with_mistral
+from tools.water import increment_aiwaterdrops, load_aiwaterdrops, get_aiwaterdrops
 
 # ----------- Constants ----------- #
 AGENT_NAME = "summarize_articles"
-VERSION = "0.2.0"
-WATERDROP_ESTIMATE_PER_SUMMARY = 2
+VERSION = "0.2.1"
 
-# ----------- App Initialization ----------- #
-app = FastAPI(title="Summarize Articles Agent", version=VERSION)
-start_time = time.time()
-
-# ----------- Internal State / Registry ----------- #
-try:
-    with open("mood.json", "r") as mood_json:
-        mood = json.load(mood_json)
-except FileNotFoundError:
-    mood = {"status": "neutral", "last_summary": None}
-
+# ----------- Credentials ----------- #
+# LLM Key
 try:
     with open("license_keys.json", "r") as license_json:
         license_keys = json.load(license_json)
 except FileNotFoundError as license_error:
     raise RuntimeError("Missing license_keys.json. Cannot proceed without license.") from license_error
+
+# ----------- App Initialization ----------- #
+app = FastAPI(title="Summarize Articles Agent", version=VERSION)
+start_time = time.time()
+
+# ----------- State Management ----------- #
+# Mood
+try:
+    with open("mood.json", "r") as mood_json:
+        mood = json.load(mood_json)
+except FileNotFoundError:
+    mood = {"current_mood": "neutral", "last_summary": None}
+
+# Current water consumption
+aiwaterdrops_consumed = load_aiwaterdrops()
 
 # ----------- Helper Functions ----------- #
 def generate_summaries(payload: dict) -> dict:
@@ -108,6 +114,7 @@ def generate_summaries(payload: dict) -> dict:
 
         summaries.append(summary)
         waterdrops_used += waterdrops
+        increment_aiwaterdrops(waterdrops)
 
     mood["status"] = "active"
     mood["last_summary"] = summaries[-1] if summaries else None
@@ -124,6 +131,24 @@ def generate_summaries(payload: dict) -> dict:
 
 @app.get("/manifest")
 def get_manifest() -> dict:
+    """
+    Returns the full agent manifest.
+
+    Returns:
+        dict: The full manifest as declared in `manifest.json`
+
+    Initial State:
+        - manifest.json file is present and readable
+
+    Final State:
+        - The manifest is loaded and returned unchanged
+
+    Raises:
+        HTTPException: If the file is missing or unreadable
+
+    Water Cost:
+        - 0
+    """
     try:
         with open("manifest.json", "r") as f:
             return json.load(f)
@@ -147,7 +172,7 @@ def health() -> dict:
     Water Cost:
         - 0 waterdrop per call
     """
-    return {"status": "Summarize Articles Agent is up.", "mood": mood.get("status", "unknown")}
+    return {"status": "Summarize Articles Agent is up and running."}
 
 @app.get("/capabilities")
 def get_capabilities() -> dict:
@@ -255,15 +280,13 @@ def get_metrics() -> dict:
         - 0
     """
     uptime = int(time.time() - start_time)
-    last_summary = mood.get("last_summary")
-    total_waterdrops = WATERDROP_ESTIMATE_PER_SUMMARY if last_summary else 0
 
     return {
         "agent": AGENT_NAME,
         "version": VERSION,
         "uptime_seconds": uptime,
-        "current_mood": mood.get("status", "unknown"),
-        "total_waterdrops_estimated": total_waterdrops
+        "current_mood": mood.get("current_mood", "unknown"),
+        "aiwaterdrops_consumed": get_aiwaterdrops()
     }
 
 @app.get("/mood")
@@ -284,6 +307,6 @@ def get_mood() -> dict:
         - 0
     """
     return {
-        "current_mood": mood.get("status", "unknown"),
+        "current_mood": mood.get("curent_mood", "unknown"),
         "last_summary": mood.get("last_summary")
     }

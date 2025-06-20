@@ -16,6 +16,7 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 
 # Copy the entire application
 COPY . .
+RUN mkdir -p memory/short_term && chmod -R 755 memory
 
 # Expose the port FastAPI will run on
 EXPOSE 8000

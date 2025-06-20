@@ -25,31 +25,31 @@ Final State:
 - A deterministic and syntactically valid plan is returned as a string
 - Only real agents and capabilities from the registry are used
 - The plan can be parsed and executed step-by-step by the orchestrator
+- The orchestrator's waterdrop counter is incremented
 
-Version: 0.2.1
+Version: 0.3.0
 Validated by: Olivier Hays
-Date: 2025-06-15
+Date: 2025-06-20
 
 Estimated Water Cost:
 - 1 waterdrop per planning request (fixed)
 """
 
+# ----------- Imports ----------- #
 import requests
-import json
-from pathlib import Path
 from typing import Tuple
 
-
-
-# --------- Core Function: Plan Generation --------- #
+# ----------- Core Function ----------- #
 def generate_plan_with_mistral(goal: str, agents_registry: dict, license_keys: dict) -> Tuple[str, int]:
     """
-    Generates a plan to achieve a user-defined goal using registered agents.
+    Summary:
+        Generates an execution plan to fulfill a user-defined goal using registered agents,
+        by calling the Mistral API and returning a structured plan.
 
     Parameters:
         goal (str): A clear description of the user's objective.
         agents_registry (dict): Agent metadata including names and capabilities.
-        license_keys (str) : Mistral API license keys.
+        license_keys (dict): API credentials containing the Mistral key.
 
     Returns:
         tuple[str, int]: A step-by-step plan and its energy cost (in waterdrops).
@@ -63,23 +63,23 @@ def generate_plan_with_mistral(goal: str, agents_registry: dict, license_keys: d
         - A deterministic plan is returned in textual form (e.g., "1. agent → capability")
         - The plan exclusively uses declared agents and capabilities
         - The plan is ready to be parsed and executed by the orchestrator
-        - 1 waterdrop is consumed
+        - 1 waterdrop is consumed and recorded
 
     Raises:
-        ValueError: If inputs are malformed or no agents are available.
-        Exception: For API or unexpected errors.
+        ValueError — If inputs are malformed or no agents are available.
+        Exception — For network or API-related failures.
 
     Water Cost:
         - Fixed cost of 1 waterdrop per planning.
     """
-    # --------- Input Validation --------- #
+    # ----------- Input Validation ----------- #
     if not goal or not isinstance(goal, str):
         raise ValueError("Goal must be a non-empty string.")
 
     if not agents_registry:
         raise ValueError("No agents registered. Cannot generate meaningful plan.")
 
-    # --------- Agent Capability Context --------- #
+    # ----------- Agent Context Formatting ----------- #
     agent_list = []
     for name, data in agents_registry.items():
         manifest = data.get("manifest", {})
@@ -88,27 +88,33 @@ def generate_plan_with_mistral(goal: str, agents_registry: dict, license_keys: d
         agent_list.append(f"- {name}: {', '.join(caps)}")
     agent_description = "\n".join(agent_list)
 
-    # --------- System Prompt Construction --------- #
+    # ----------- Prompt Construction ----------- #
     system_prompt = f"""
     You are a planning assistant for an AI orchestration system.
-    Your task is to generate a **strictly step-by-step execution plan** to fulfill a user goal using ONLY the available agents listed below.
+    Your task is to generate a strictly step-by-step execution plan to fulfill a user goal using ONLY the available agents and capabilities listed below.
 
-    🧠 Available agents:
+    🧠 Available agents and their capabilities:
     {agent_description}
 
-    ⚠️ Very important:
-    - Do NOT mention code.
-    - Do NOT suggest using external tools.
-    - Do NOT add explanations.
-    - Your entire response must ONLY be the plan steps using the agent names and capabilities.
-    - Refer to the agents by their **exact name** and their capabilities.
+    ⚠️ VERY IMPORTANT RULES:
+    - You must use ONLY the agents and capabilities listed above.
+    - Use the exact name of the agent as shown above.
+    - Use the exact name of the capability as shown above.
+    - The format of each step MUST be:
 
-    🎯 Format:
-    1. AgentName → capability_name
-    2. AgentName → capability_name
+      agent_name → capability_name
+
+    - NEVER invert the order. The agent MUST be on the left of the arrow (→), and the capability MUST be on the right.
+    - NEVER invent new agents or capabilities.
+    - NEVER add explanations, comments, or formatting outside the plan.
+
+    🎯 Your response must ONLY be the plan steps in this format:
+    1. agent_name → capability_name
+    2. agent_name → capability_name
+    3. agent_name → capability_name
     """
 
-    # --------- Mistral API Call --------- #
+    # ----------- API Request ----------- #
     payload = {
         "model": "mistral-small",
         "messages": [
@@ -123,14 +129,14 @@ def generate_plan_with_mistral(goal: str, agents_registry: dict, license_keys: d
         "Content-Type": "application/json"
     }
 
+    # ----------- Remote Call + Water Accounting ----------- #
     try:
         response = requests.post("https://api.mistral.ai/v1/chat/completions", headers=headers, json=payload)
         response.raise_for_status()
         result = response.json()
         plan = result["choices"][0]["message"]["content"].strip()
-        return plan, 1  # ~1 waterdrop used
+        return plan, 1
     except requests.exceptions.RequestException as req_error:
         raise Exception(f"Mistral API request failed: {req_error}")
     except Exception as general_error:
         raise Exception(f"Unexpected error during plan generation: {general_error}")
-

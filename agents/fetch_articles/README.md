@@ -1,7 +1,7 @@
 # ClearCoreAI Agent: fetch_articles
 
-**Version:** 0.2.2  
-**Last Updated:** 2025-06-18  
+**Version:** 0.2.3  
+**Last Updated:** 2025-06-20  
 **Validated by:** Olivier Hays  
 
 ---
@@ -25,7 +25,7 @@ It features:
 ### `GET /health`
 
 Basic health check to verify that the agent is up.  
-Water cost: 1 waterdrop
+Water cost: 0
 
 ---
 
@@ -46,7 +46,7 @@ Water cost: 0
 
 ### `GET /metrics`
 
-Returns runtime metrics:
+Returns runtime metrics **specific to this agent**:
 
 - agent name and version  
 - uptime in seconds  
@@ -72,7 +72,14 @@ Water cost: 0
 ### `GET /get_articles`
 
 Returns a predefined list of static news articles stored in the `memory/long_term/` folder.  
-Water cost: 3 waterdrops
+Each `.txt` file should contain:
+
+```
+First line → Title  
+Remaining lines → Article content
+```
+
+Water cost: **1 + 0.05 + 0.1 per article (dynamic)**
 
 ---
 
@@ -174,6 +181,13 @@ To initialize the memory:
 mkdir -p memory/short_term memory/long_term
 echo '{"aiwaterdrops_consumed": 0}' > memory/short_term/aiwaterdrops.json
 ```
+
+---
+
+## Self-Registration
+
+The agent attempts to register itself to the orchestrator at startup via `/manifest`.  
+If the orchestrator is not available, it will log the error but continue running.
 
 ---
 

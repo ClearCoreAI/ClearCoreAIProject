@@ -25,9 +25,9 @@ Final State:
 - Static articles are retrievable
 - Water usage and mood are updated on each call
 
-Version: 0.2.2
+Version: 0.2.3
 Validated by: Olivier Hays
-Date: 2025-06-18
+Date: 2025-06-20
 
 Estimated Water Cost:
 - 1 waterdrop per /health call
@@ -41,75 +41,28 @@ import time
 import json
 import requests
 from fastapi import FastAPI, HTTPException, Request
-from contextlib import asynccontextmanager
 from pathlib import Path
+from tools.water import increment_aiwaterdrops, load_aiwaterdrops, get_aiwaterdrops
 
 # ----------- Constants ----------- #
-ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://localhost:8000/register_agent")
+ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://orchestrator:8000/register_agent")
 AGENT_NAME = "fetch_articles"
 START_TIME = time.time()
 AIWATERDROPS_FILE = Path("memory/short_term/aiwaterdrops.json")
 ARTICLES_DIR = Path("memory/long_term/")
-VERSION = "0.2.0"
-
-# ----------- Internal State ----------- #
-with open("mood.json", "r") as mood_file:
-    mood = json.load(mood_file)
+VERSION = "0.2.3"
 
 # ----------- App Initialization ----------- #
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    register_with_orchestrator()
-    yield
-
-
-app = FastAPI(title="Fetch Articles Agent", version=VERSION, lifespan=lifespan)
+app = FastAPI(title="Fetch Articles Agent", version=VERSION)
 
 # ----------- State Management ----------- #
-def load_aiwaterdrops() -> float:
-    """
-    Loads current waterdrop usage from persistent file.
-
-    Returns:
-        float: Total AI waterdrops consumed
-
-    Initial State:
-        - File may or may not exist
-
-    Final State:
-        - Waterdrop value is read or defaults to 0.0
-
-    Water Cost:
-        - 0
-    """
-    try:
-        with AIWATERDROPS_FILE.open("r") as f:
-            return json.load(f).get("aiwaterdrops_consumed", 0.0)
-    except FileNotFoundError:
-        return 0.0
-
-def save_aiwaterdrops(value: float) -> None:
-    """
-    Persists the current AI waterdrop consumption to file.
-
-    Parameters:
-        value (float): New total of AI waterdrops consumed
-
-    Returns:
-        None
-
-    Initial State:
-        - Directory is writable
-
-    Final State:
-        - Value is saved to AIWATERDROPS_FILE
-
-    Water Cost:
-        - 0
-    """
-    with AIWATERDROPS_FILE.open("w") as f:
-        json.dump({"aiwaterdrops_consumed": value}, f)
-
+# Mood
+try:
+    with open("mood.json", "r") as mood_json:
+        mood = json.load(mood_json)
+except FileNotFoundError:
+    mood = {"current_mood": "happy", "last_summary": None}
+# Current water consumption
 aiwaterdrops_consumed = load_aiwaterdrops()
 
 # ----------- Capabilities ----------- #
@@ -146,6 +99,7 @@ def fetch_static_articles() -> dict:
         except Exception as e:
             print(f"⚠️ Failed to load article from {file_path}: {e}")
             continue
+    increment_aiwaterdrops(0.05 + len(articles) * 0.1)
     return {"articles": articles}
 
 def generate_article_collection(data: dict) -> dict:
@@ -168,6 +122,7 @@ def generate_article_collection(data: dict) -> dict:
         - 0.02 per call
     """
     articles = data.get("articles", [])
+    increment_aiwaterdrops(0.2)
     return {
         "collection": {
             "count": len(articles),
@@ -175,41 +130,46 @@ def generate_article_collection(data: dict) -> dict:
         }
     }
 
-# ----------- Startup Logic ----------- #
-def register_with_orchestrator() -> None:
+# ----------- API Endpoints ----------- #
+@app.get("/health")
+def health_check() -> dict:
     """
-    Registers this agent to orchestrator.
+    Returns basic status message confirming the agent is operational.
+
+    Returns:
+        dict: Status confirmation message
 
     Initial State:
-        - Orchestrator reachable
+        - Agent is initialized
 
     Final State:
-        - Agent appears in orchestrator registry
-
-    Raises:
-        Exception: If orchestrator is unreachable or manifest is missing
+        - Health status returned
 
     Water Cost:
         - 0
     """
-    time.sleep(2)
-    try:
-        payload = {
-            "name": AGENT_NAME,
-            "base_url": f"http://localhost:8500"
-        }
-        response = requests.post(ORCHESTRATOR_URL, json=payload, timeout=5)
-        print(f"✅ Registered agent: {response.json()}")
-    except Exception as e:
-        print(f"❌ Error registering agent: {e}")
-
-# ----------- API Endpoints ----------- #
-@app.get("/health")
-def health_check() -> dict:
     return {"status": "Fetch Articles Agent is up and running."}
 
 @app.get("/capabilities")
 def get_capabilities() -> dict:
+    """
+    Returns the list of declared capabilities from the manifest.
+
+    Returns:
+        dict: {"capabilities": [...]}
+
+    Initial State:
+        - manifest.json must be present
+
+    Final State:
+        - List of capabilities returned
+
+    Raises:
+        HTTPException: If manifest is missing
+
+    Water Cost:
+        - 0
+    """
     try:
         with open("manifest.json", "r") as f:
             manifest = json.load(f)
@@ -219,6 +179,24 @@ def get_capabilities() -> dict:
 
 @app.get("/manifest")
 def get_manifest() -> dict:
+    """
+    Returns the full manifest file content.
+
+    Returns:
+        dict: Full manifest
+
+    Initial State:
+        - manifest.json must exist
+
+    Final State:
+        - Manifest returned or 404
+
+    Raises:
+        HTTPException: If file not found
+
+    Water Cost:
+        - 0
+    """
     try:
         with open("manifest.json", "r") as f:
             return json.load(f)
@@ -227,24 +205,67 @@ def get_manifest() -> dict:
 
 @app.get("/metrics")
 def get_metrics() -> dict:
+    """
+    Returns agent uptime, version, mood and water usage metrics.
+
+    Returns:
+        dict: Agent metrics including uptime and waterdrops
+
+    Initial State:
+        - mood and uptime tracked
+
+    Final State:
+        - Metrics snapshot returned
+
+    Water Cost:
+        - 0
+    """
     uptime_seconds = int(time.time() - START_TIME)
     return {
         "agent_name": AGENT_NAME,
         "version": "0.2.2",
         "uptime_seconds": uptime_seconds,
         "current_mood": mood.get("current_mood", "unknown"),
-        "aiwaterdrops_consumed": aiwaterdrops_consumed
+        "aiwaterdrops_consumed": get_aiwaterdrops()
     }
 
 @app.get("/get_articles")
 def get_articles() -> dict:
-    global aiwaterdrops_consumed
-    aiwaterdrops_consumed += 1
-    save_aiwaterdrops(aiwaterdrops_consumed)
+    """
+    Returns the list of static articles and tracks water usage.
+
+    Returns:
+        dict: {"articles": [...]}
+
+    Initial State:
+        - Files available in ARTICLES_DIR
+
+    Final State:
+        - Articles returned and water usage incremented
+
+    Water Cost:
+        - 1 waterdrop
+    """
+    increment_aiwaterdrops(1)
     return fetch_static_articles()
 
 @app.get("/mood")
 def get_mood() -> dict:
+    """
+    Returns the current mood and mood history.
+
+    Returns:
+        dict: Current mood, last update, and history
+
+    Initial State:
+        - mood.json loaded
+
+    Final State:
+        - Mood data returned
+
+    Water Cost:
+        - 0
+    """
     return {
         "current_mood": mood.get("current_mood", "unknown"),
         "last_updated": mood.get("last_updated", "unknown"),
@@ -281,15 +302,11 @@ async def execute(request: Request) -> dict:
         input_data = payload.get("input", {})
 
         if capability == "fetch_static_articles":
-            aiwaterdrops_consumed += 0.02
-            save_aiwaterdrops(aiwaterdrops_consumed)
+            increment_aiwaterdrops(0.02)
             return fetch_static_articles()
-
         elif capability == "generate_article_collection":
-            aiwaterdrops_consumed += 0.02
-            save_aiwaterdrops(aiwaterdrops_consumed)
+            increment_aiwaterdrops(0.02)
             return generate_article_collection(input_data)
-
         else:
             raise HTTPException(status_code=400, detail=f"Unknown capability: {capability}")
 

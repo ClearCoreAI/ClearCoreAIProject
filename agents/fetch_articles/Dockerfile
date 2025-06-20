@@ -1,22 +1,24 @@
-# Use official Python image
+# Base image: minimal Python 3.11
 FROM python:3.11-slim
 
-# Set workdir
+# --- Environment optimizations ---
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+
+# --- Working directory inside container ---
 WORKDIR /app
 
-# Copy requirements and install
+# --- Install Python dependencies ---
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Copy source files
-COPY app.py /app/
-COPY mood.json /app/
-COPY license_keys.json.template /app/
-COPY manifest.json /app/
-COPY memory/ /app/memory/
+# --- Copy full source code into container ---
+COPY . .
+RUN mkdir -p memory/short_term && chmod -R 755 memory
 
-# Expose port
+# --- Expose FastAPI agent port (customizable per agent) ---
 EXPOSE 8500
 
-# Start app
+# --- Default startup command for this agent ---
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8500"]

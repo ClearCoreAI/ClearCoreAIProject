@@ -16,6 +16,8 @@ COPY manifest_template.json /app/
 COPY models/ /app/models/
 COPY tools /app/tools
 COPY license_keys.json /app/license_keys.json
+COPY memory/ /app/memory/
+RUN mkdir -p memory/short_term && chmod -R 755 memory
 
 # Expose port
 EXPOSE 8000

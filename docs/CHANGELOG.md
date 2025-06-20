@@ -5,6 +5,33 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.3.0] – 2025-06-20
+
+**Total waterdrop aggregation, LLM orchestration fixes, and improved developer onboarding**
+
+### Added
+
+- New route `/water/total` in the orchestrator to compute total waterdrop usage across all agents and the orchestrator.
+- New `QUICKSTART.txt` to guide testing via `curl`, with example `.txt` articles.
+- Support for `/run_goal` endpoint, combining plan generation and execution in one step.
+- Automatic file creation logic for `license_keys.json` and `aiwaterdrops.json`.
+
+### Fixed
+
+- Agents now use `get_aiwaterdrops()` instead of `load_aiwaterdrops()` to properly track consumption.
+- `summarize_articles` and `fetch_articles` now consistently report and persist water usage.
+- LLM system prompt updated to avoid generating hallucinated agent names or capabilities.
+
+### Documentation
+
+- Updated all agent and orchestrator `README.md` files:
+  - clarified required folders and files (`memory/`, `license_keys.json`)
+  - added endpoint usage examples
+  - listed accurate waterdrop costs
+- Enhanced clarity on how to run manual tests with expected JSON outputs.
+
+---
+
 ## [0.2.0] - 2025-06-18
 
 **Expanded agent capabilities and improved orchestration logic**

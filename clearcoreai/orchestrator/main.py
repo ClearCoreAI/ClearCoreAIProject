@@ -31,8 +31,8 @@ Estimated Water Cost:
 - 3 waterdrops per planning
 
 Validated by: Olivier Hays
-Date: 2025-06-18
-Version: 0.3.0
+Date: 2025-06-20
+Version: 0.3.1
 """
 
 # ----------- Imports ----------- #
@@ -44,6 +44,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from jsonschema import validate, ValidationError
 from tools.llm_utils import generate_plan_with_mistral
+from tools.water import increment_aiwaterdrops, load_aiwaterdrops, get_aiwaterdrops
 
 # ----------- Constants ----------- #
 ROOT = Path(__file__).parent
@@ -51,16 +52,29 @@ AGENTS_FILE = ROOT / "agents.json"
 TEMPLATE_FILE = ROOT / "manifest_template.json"
 AGENT_DIR = ROOT / "agents"
 LICENSE_FILE = ROOT / "license_keys.json"
-VERSION = "0.3.0"
+AIWATERDROPS_FILE  = ROOT / "memory" / "short_term" / "aiwaterdrops.json"
+VERSION = "0.3.1"
 
-# ----------- FastAPI App ----------- #
+# ----------- Credentials ----------- #
+# LLM Key
+try:
+    with open("license_keys.json", "r") as license_json:
+        license_keys = json.load(license_json)
+except FileNotFoundError as license_error:
+    raise RuntimeError("Missing license_keys.json. Cannot proceed without license.") from license_error
+
+# ----------- App Initialization ----------- #
 app = FastAPI(
     title="ClearCoreAI Orchestrator",
     description="Central hub for registering and connecting ClearCoreAI agents.",
     version=VERSION
 )
 
-# ----------- In-Memory Agent Registry ----------- #
+# ----------- State Management ----------- #
+
+# Current water consumption
+aiwaterdrops_consumed = load_aiwaterdrops()
+# Agents storage
 agents_registry = {}
 
 # ----------- Load Template ----------- #
@@ -75,7 +89,26 @@ except Exception as template_error:
 # ----------- Internal Utilities ----------- #
 def _load_agents() -> dict:
     """
-    Loads the saved registry of agents from disk.
+    Summary:
+        Load the registry of agents from disk if it exists.
+
+    Parameters:
+        None
+
+    Returns:
+        dict: Parsed content of agents.json, or empty dict if file not found.
+
+    Initial State:
+        `agents.json` may or may not exist.
+
+    Final State:
+        Returns loaded registry or initializes an empty one.
+
+    Raises:
+        RuntimeError — if agents.json is malformed or cannot be read.
+
+    Water Cost:
+        0 (internal function)
     """
     if AGENTS_FILE.exists():
         try:
@@ -87,7 +120,26 @@ def _load_agents() -> dict:
 
 def _save_agents(registry: dict) -> None:
     """
-    Persists the current agent registry to disk.
+    Summary:
+        Save the current agent registry to disk.
+
+    Parameters:
+        registry (dict): The agent registry to persist.
+
+    Returns:
+        None
+
+    Initial State:
+        In-memory `registry` is populated.
+
+    Final State:
+        `agents.json` is written or overwritten.
+
+    Raises:
+        RuntimeError — if writing to disk fails.
+
+    Water Cost:
+        0 (internal function)
     """
     try:
         with AGENTS_FILE.open("w", encoding="utf-8") as f:
@@ -97,7 +149,26 @@ def _save_agents(registry: dict) -> None:
 
 def _load_agent_manifest(agent_name: str) -> dict:
     """
-    Loads the manifest.json of a given agent.
+    Summary:
+        Load manifest.json of a specific agent by name.
+
+    Parameters:
+        agent_name (str): Name of the agent.
+
+    Returns:
+        dict: Parsed content of the agent's manifest.json.
+
+    Initial State:
+        Agent's manifest file must exist under agents/<agent_name>/.
+
+    Final State:
+        Manifest is loaded and returned.
+
+    Raises:
+        FileNotFoundError — if manifest does not exist.
+
+    Water Cost:
+        0 (internal function)
     """
     manifest_path = AGENT_DIR / agent_name / "manifest.json"
     if not manifest_path.exists():
@@ -107,7 +178,27 @@ def _load_agent_manifest(agent_name: str) -> dict:
 
 def _are_specs_compatible(output_spec: dict, input_spec: dict) -> bool:
     """
-    Determines whether an output spec and input spec are type-compatible.
+    Summary:
+        Check if the output type of one agent matches the input type of another.
+
+    Parameters:
+        output_spec (dict): Output specification from an agent manifest.
+        input_spec (dict): Input specification from another agent manifest.
+
+    Returns:
+        bool: True if specs match on type, else False.
+
+    Initial State:
+        Both specs must be valid dictionaries.
+
+    Final State:
+        Compatibility is evaluated.
+
+    Raises:
+        None
+
+    Water Cost:
+        0 (internal function)
     """
     return output_spec.get("type") == input_spec.get("type")
 
@@ -122,6 +213,28 @@ class AgentRegistration(BaseModel):
 # ----------- API Endpoints ----------- #
 @app.get("/health")
 def health():
+    """
+    Summary:
+        Check orchestrator status and return list of registered agents.
+
+    Parameters:
+        None
+
+    Returns:
+        dict: Dictionary with orchestrator status and agent names.
+
+    Initial State:
+        Orchestrator must be running and registry loaded.
+
+    Final State:
+        Returns basic health information and current agent list.
+
+    Raises:
+        None
+
+    Water Cost:
+        0
+    """
     return {
         "status": "ClearCoreAI Orchestrator is running.",
         "registered_agents": list(agents_registry.keys())
@@ -130,7 +243,26 @@ def health():
 @app.post("/register_agent")
 def register_agent(agent: AgentRegistration):
     """
-    Registers a new agent, validates its manifest, and saves it to the registry.
+    Summary:
+        Register a new agent by validating its manifest and storing it persistently.
+
+    Parameters:
+        agent (AgentRegistration): Object containing agent name and base URL.
+
+    Returns:
+        dict: Confirmation message upon success.
+
+    Initial State:
+        Agent must expose a valid `/manifest` endpoint.
+
+    Final State:
+        Agent manifest is stored and visible in registry.
+
+    Raises:
+        HTTPException — if unreachable, malformed, or manifest is invalid.
+
+    Water Cost:
+        0.2 waterdrops
     """
     try:
         # ➤ Use /manifest instead of /capabilities to get the full manifest
@@ -156,14 +288,34 @@ def register_agent(agent: AgentRegistration):
         _save_agents(agents_registry)
     except RuntimeError as save_error:
         raise HTTPException(status_code=500, detail=str(save_error))
-
+    increment_aiwaterdrops(0.2)
     return {"message": f"Agent '{agent.name}' registered successfully."}
 
 @app.get("/agents")
 def list_agents():
     """
-    Returns a list of registered agents and their capabilities.
+    Summary:
+        List all registered agents along with their declared capabilities.
+
+    Parameters:
+        None
+
+    Returns:
+        dict: Mapping of agent names to base_url and capabilities.
+
+    Initial State:
+        Registry must be loaded.
+
+    Final State:
+        Returns a filtered view of registered agents.
+
+    Raises:
+        None
+
+    Water Cost:
+        0.05 waterdrops
     """
+    increment_aiwaterdrops(0.05)
     return {
         "agents": {
             name: {
@@ -177,7 +329,26 @@ def list_agents():
 @app.get("/agent_manifest/{agent_name}")
 def get_agent_manifest(agent_name: str):
     """
-    Returns the manifest.json for a given agent.
+    Summary:
+        Retrieve full manifest for a given agent.
+
+    Parameters:
+        agent_name (str): The name of the agent to query.
+
+    Returns:
+        dict: Parsed manifest of the agent.
+
+    Initial State:
+        Agent must be registered.
+
+    Final State:
+        Manifest is returned unchanged.
+
+    Raises:
+        HTTPException — if agent not found.
+
+    Water Cost:
+        0
     """
     if agent_name not in agents_registry:
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_name}")
@@ -186,7 +357,26 @@ def get_agent_manifest(agent_name: str):
 @app.get("/agents/connections")
 def detect_agent_connections():
     """
-    Computes a list of compatible input/output links between agents.
+    Summary:
+        Detect compatible input/output connections between all registered agents.
+
+    Parameters:
+        None
+
+    Returns:
+        dict: List of connection tuples with reasons.
+
+    Initial State:
+        Registry must be populated with valid manifests.
+
+    Final State:
+        Computed list of agent links is returned.
+
+    Raises:
+        HTTPException — on manifest parsing or matching failure.
+
+    Water Cost:
+        0
     """
     connections = []
     try:
@@ -212,7 +402,26 @@ def detect_agent_connections():
 @app.get("/agents/metrics")
 def aggregate_agent_metrics():
     """
-    Queries all agents for /metrics and aggregates results.
+    Summary:
+        Query all registered agents for their `/metrics` data.
+
+    Parameters:
+        None
+
+    Returns:
+        dict: Aggregated metrics per agent or error info.
+
+    Initial State:
+        Agents must expose `/metrics`.
+
+    Final State:
+        Returns latest metrics or fallback error per agent.
+
+    Raises:
+        None, handled gracefully per agent.
+
+    Water Cost:
+        0 (monitoring is free)
     """
     results = {}
     for name, data in agents_registry.items():
@@ -228,7 +437,26 @@ def aggregate_agent_metrics():
 @app.get("/agents/raw")
 def get_all_agent_manifests():
     """
-    Returns all registered agents' manifest.json content.
+    Summary:
+        Return raw manifest content for all registered agents.
+
+    Parameters:
+        None
+
+    Returns:
+        dict: Agent names mapped to their manifest.json content.
+
+    Initial State:
+        Registry must contain valid manifests.
+
+    Final State:
+        Manifests are returned verbatim.
+
+    Raises:
+        None
+
+    Water Cost:
+        0
     """
     return {
         name: data["manifest"]
@@ -238,12 +466,31 @@ def get_all_agent_manifests():
 # ----------- Planning & Execution ----------- #
 def generate_plan_from_goal(goal: str) -> str:
     """
-    Generates an execution plan from a natural language goal using LLM inference.
+    Summary:
+        Generate an execution plan from a natural language goal using LLM inference.
+
+    Parameters:
+        goal (str): Natural language objective to transform into a structured plan.
+
+    Returns:
+        str: Multistep plan in numbered text format, one step per line.
+
+    Initial State:
+        LICENSE_FILE must exist and contain a valid API key.
+        Registry must contain at least one agent with declared capabilities.
+
+    Final State:
+        A valid execution plan string is returned.
+
+    Raises:
+        RuntimeError — if plan generation fails or returns invalid format.
+
+    Water Cost:
+        3 waterdrops (LLM inference and registry scan)
     """
     try:
-        with LICENSE_FILE.open("r", encoding="utf-8") as f:
-            license_keys = json.load(f)
-        plan, _ = generate_plan_with_mistral(goal, agents_registry, license_keys)
+        plan, water_cost = generate_plan_with_mistral(goal, agents_registry, license_keys)
+        increment_aiwaterdrops(water_cost)
         if isinstance(plan, list):
             return "\n".join(map(str, plan))
         elif isinstance(plan, str):
@@ -253,12 +500,32 @@ def generate_plan_from_goal(goal: str) -> str:
     except Exception as plan_error:
         raise RuntimeError(f"Plan generation failed: {plan_error}")
 
+
 @app.post("/plan")
 def plan_goal(request: dict):
     """
-    Converts a goal into a multi-step execution plan.
+    Summary:
+        Generate a ClearCoreAI execution plan from a given goal string.
+
+    Parameters:
+        request (GoalRequest): Must contain a 'goal' key with a natural language objective.
+
+    Returns:
+        dict: The original goal and its corresponding structured plan.
+
+    Initial State:
+        Same as `generate_plan_from_goal`.
+
+    Final State:
+        Returns the computed plan string.
+
+    Raises:
+        HTTPException — if goal is missing or plan generation fails.
+
+    Water Cost:
+        3 waterdrops (delegates to LLM plan generation)
     """
-    goal = request.get("goal")
+    goal =  request.get("goal")
     if not goal:
         raise HTTPException(status_code=400, detail="Missing 'goal' field.")
     try:
@@ -269,7 +536,26 @@ def plan_goal(request: dict):
 
 def execute_plan_string(plan: str) -> dict:
     """
-    Executes a step-by-step plan and returns traceable outputs for each stage.
+    Summary:
+        Execute a structured plan step-by-step and return a full execution trace.
+
+    Parameters:
+        plan (str): Multiline execution plan, formatted as "1. agent → capability".
+
+    Returns:
+        dict: Contains the full plan, per-step execution trace, and final output context.
+
+    Initial State:
+        Agents in the plan must be registered and reachable via /execute.
+
+    Final State:
+        Executes each step in sequence, updating shared context progressively.
+
+    Raises:
+        None directly — execution errors are embedded per step in the result.
+
+    Water Cost:
+        ~0.02 waterdrops fixed + full cost of each /execute call per step (depends on agents)
     """
     results = []
     context = None
@@ -307,6 +593,7 @@ def execute_plan_string(plan: str) -> dict:
             results.append({"step": step, "error": str(execution_error)})
             break
 
+    increment_aiwaterdrops(0.02)
     return {
         "plan": plan,
         "execution": results,
@@ -316,7 +603,26 @@ def execute_plan_string(plan: str) -> dict:
 @app.post("/execute_plan")
 def execute_plan(request: dict):
     """
-    Executes a plan provided in plain text.
+    Summary:
+        Execute a given textual plan and return the results.
+
+    Parameters:
+        request (dict): Must contain a 'plan' field with a valid plan string.
+
+    Returns:
+        dict: Execution result as returned by `execute_plan_string`.
+
+    Initial State:
+        Same requirements as `execute_plan_string`.
+
+    Final State:
+        Plan is fully executed or halted on first major error.
+
+    Raises:
+        HTTPException — if the 'plan' field is missing.
+
+    Water Cost:
+        Pass-through — see `execute_plan_string`
     """
     plan = request.get("plan")
     if not plan:
@@ -326,8 +632,26 @@ def execute_plan(request: dict):
 @app.post("/run_goal")
 def run_goal(payload: dict):
     """
-    High-level endpoint to handle natural language goal:
-    generates a plan and executes it fully.
+    Summary:
+        End-to-end handler: transforms a natural language goal into a plan and executes it.
+
+    Parameters:
+        payload (dict): Must contain a 'goal' string field.
+
+    Returns:
+        dict: Full result including goal, generated plan, and execution trace.
+
+    Initial State:
+        Same as for plan and execution.
+
+    Final State:
+        One-click processing of goal into final output.
+
+    Raises:
+        HTTPException — if goal is missing or any part of the process fails.
+
+    Water Cost:
+        3 waterdrops (plan) + all waterdrops from plan execution (variable)
     """
     goal = payload.get("goal")
     if not goal:
@@ -342,3 +666,51 @@ def run_goal(payload: dict):
         }
     except Exception as run_error:
         raise HTTPException(status_code=500, detail=str(run_error))
+
+@app.get("/water/total")
+def get_total_water_usage():
+    """
+    Summary:
+        Returns the total waterdrop consumption including orchestrator and all agents.
+
+    Parameters:
+        None
+
+    Returns:
+        dict: Breakdown of water usage per component and total sum.
+
+    Initial State:
+        Orchestrator and agents have stored water usage data.
+
+    Final State:
+        Aggregated metrics are computed and returned.
+
+    Raises:
+        None
+
+    Water Cost:
+        0
+    """
+    from tools.water import get_aiwaterdrops
+
+    total = get_aiwaterdrops()
+    breakdown = {
+        "orchestrator": total
+    }
+
+    for name, data in agents_registry.items():
+        base_url = data.get("base_url")
+        try:
+            response = requests.get(f"{base_url}/metrics", timeout=3)
+            response.raise_for_status()
+            agent_data = response.json()
+            usage = agent_data.get("aiwaterdrops_consumed", 0.0)
+            breakdown[name] = usage
+            total += usage
+        except Exception as e:
+            breakdown[name] = f"error: {str(e)}"
+
+    return {
+        "breakdown": breakdown,
+        "total_waterdrops": round(total, 3)
+    }
