@@ -141,7 +141,7 @@ We welcome contributions to make ClearCoreAI even better!
 - Respect waterdrop accounting in every route
 - Keep it modular and readable
 
-You can also check the [ROADMAP](docs/ROADMAP.md) and [CHANGELOG](CHANGELOG.md) for ideas.
+You can also check the [ROADMAP](docs/ROADMAP.md) and [CHANGELOG](docs/CHANGELOG.md) for ideas.
 
 ---
 
