@@ -184,6 +184,25 @@ echo '{"aiwaterdrops_consumed": 0}' > memory/short_term/aiwaterdrops.json
 
 ---
 
+## Preloading Articles from Input Examples
+
+To populate the agent's memory with example articles, copy files from `input_examples/` to `memory/long_term/`:
+
+```bash
+cp input_examples/*.txt memory/long_term/
+```
+
+Each file should follow the expected format:
+
+```
+First line → Title  
+Remaining lines → Article content
+```
+
+These will be served via the `/get_articles` and `fetch_static_articles` endpoints.
+
+---
+
 ## Self-Registration
 
 The agent attempts to register itself to the orchestrator at startup via `/manifest`.  

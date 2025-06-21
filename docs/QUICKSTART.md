@@ -37,7 +37,7 @@ memory/articles/static/sample2.txt
 docker compose up --build
 ```
 
-Wait until all three services are up:
+Wait until all three services are up, and optionally preload your `.txt` files into `input_examples/` before launching:
 - `orchestrator` → :8000
 - `fetch_articles` → :8500
 - `summarize_articles` → :8600
@@ -129,6 +129,29 @@ Expected fields:
   }
 }
 ```
+
+---
+
+## 📂 Preload sample articles from `input_examples`
+
+By default, the agent `fetch_articles` will copy `.txt` files from `input_examples/` to `memory/long_term/` during container startup via the `entrypoint.sh` script.
+
+You can add more articles to the `input_examples/` folder before launching, and they will be automatically included in the pipeline.
+
+```bash
+ls agents/fetch_articles/input_examples/
+# Example output:
+# 001_healthcare_ai.txt
+# 003_spacex_mission.txt
+```
+
+After launch, you should see the same files under:
+
+```bash
+ls agents/fetch_articles/memory/long_term/
+```
+
+If they appear there, the `fetch_static_articles` step will use them in its output.
 
 ---
 

@@ -1,25 +1,30 @@
-# Dockerfile for summarize_articles agent
-
-# Use official lightweight Python image
+# Base image: minimal Python 3.11
 FROM python:3.11-slim
 
-# Set environment variables
+# --- Environment optimizations ---
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 
-# Set working directory inside container
+# --- Set working directory inside container ---
 WORKDIR /app
 
-# Copy requirements and install dependencies
+# --- Install Python dependencies ---
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Copy the entire application
+# --- Copy full source code into the container ---
 COPY . .
+
+# --- Create memory folders and set permissions (redundant with entrypoint but kept for safety) ---
 RUN mkdir -p memory/short_term && chmod -R 755 memory
 
-# Expose the port FastAPI will run on
-EXPOSE 8000
+# --- Copy and prepare entrypoint script ---
+COPY entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 
-# Start FastAPI app with uvicorn
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8600"]
+# --- Expose FastAPI agent port (adjust per agent if needed) ---
+EXPOSE 8600
+
+# --- Default startup command: runs entrypoint script which prepares environment then launches app ---
+ENTRYPOINT ["./entrypoint.sh"]

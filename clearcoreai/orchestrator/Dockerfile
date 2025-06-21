@@ -1,26 +1,30 @@
-# Use official Python image
+# Base image: minimal Python 3.11
 FROM python:3.11-slim
 
-# Set workdir
+# --- Environment optimizations ---
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+
+# --- Set working directory inside container ---
 WORKDIR /app
 
-# Copy requirements and install
+# --- Install Python dependencies ---
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Copy source files
-COPY main.py /app/
-COPY agent_manager.py /app/
-COPY mood.json /app/
-COPY manifest_template.json /app/
-COPY models/ /app/models/
-COPY tools /app/tools
-COPY license_keys.json /app/license_keys.json
-COPY memory/ /app/memory/
+# --- Copy full source code into the container ---
+COPY . .
+
+# --- Create memory folders and set permissions (redundant with entrypoint but kept for safety) ---
 RUN mkdir -p memory/short_term && chmod -R 755 memory
 
-# Expose port
+# --- Copy and prepare entrypoint script ---
+COPY entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
+# --- Expose FastAPI agent port (adjust per agent if needed) ---
 EXPOSE 8000
 
-# Start app
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --- Default startup command: runs entrypoint script which prepares environment then launches app ---
+ENTRYPOINT ["./entrypoint.sh"]

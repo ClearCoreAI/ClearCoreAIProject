@@ -15,6 +15,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - New `QUICKSTART.txt` to guide testing via `curl`, with example `.txt` articles.
 - Support for `/run_goal` endpoint, combining plan generation and execution in one step.
 - Automatic file creation logic for `license_keys.json` and `aiwaterdrops.json`.
+- Support for preloading articles from `input_examples/` into `memory/long_term/` on agent startup.
 
 ### Fixed
 
