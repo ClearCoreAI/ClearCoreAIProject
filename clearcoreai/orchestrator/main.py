@@ -32,7 +32,7 @@ Estimated Water Cost:
 
 Validated by: Olivier Hays
 Date: 2025-06-20
-Version: 0.3.1
+Version: 0.3.3
 """
 
 # ----------- Imports ----------- #
@@ -53,7 +53,7 @@ TEMPLATE_FILE = ROOT / "manifest_template.json"
 AGENT_DIR = ROOT / "agents"
 LICENSE_FILE = ROOT / "license_keys.json"
 AIWATERDROPS_FILE  = ROOT / "memory" / "short_term" / "aiwaterdrops.json"
-VERSION = "0.3.1"
+VERSION = "0.3.3"
 
 # ----------- Credentials ----------- #
 # LLM Key

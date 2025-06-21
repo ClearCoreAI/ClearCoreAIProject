@@ -1,6 +1,6 @@
 # 🚀 ClearCoreAI — Core Orchestrator
 
-**Version:** 0.3.2  
+**Version:** 0.3.3  
 **Last Updated:** 2025-06-20  
 **Validated by:** Olivier Hays  
 
