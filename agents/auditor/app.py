@@ -5,8 +5,7 @@ Purpose: Audit the output of other agents from execution traces and return a det
 
 Description:
 This ClearCoreAI agent receives a full execution trace and analyzes the results of each step.
-It verifies the presence of outputs, checks for errors, and uses heuristics to assess the trustworthiness
-of agent results. It exposes a `/run` endpoint compatible with orchestration via the manifest.
+It verifies the presence of outputs and uses an LLM to assess the trustworthiness of agent results. It exposes a `/run` endpoint compatible with orchestration via the manifest.
 
 Philosophy:
 - All capabilities must be declared in the manifest
@@ -29,7 +28,7 @@ Date: 2025-08-06
 
 Estimated Water Cost:
 - 1 waterdrop per /health call
-- 2 waterdrops per /run audit
+- ~2 waterdrops per /run audit (LLM only)
 - 0.02 waterdrops per /execute dispatch
 """
 
@@ -40,10 +39,20 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from typing import Any, List, Optional
 from tools.water import increment_aiwaterdrops, load_aiwaterdrops, get_aiwaterdrops
+from tools.llm_utils import audit_trace_with_mistral
 
 # ----------- Constants ----------- #
 AGENT_NAME = "auditor"
 VERSION = "0.1.0"
+
+# ----------- Credentials ----------- #
+# LLM Key for auditor (Mistral)
+try:
+    with open("license_keys.json", "r") as license_json:
+        license_keys = json.load(license_json)
+except FileNotFoundError as license_error:
+    # Not fatal: we will fallback to heuristic audit if key missing
+    license_keys = {}
 
 # ----------- App Initialization ----------- #
 app = FastAPI(title="Auditor Agent", version=VERSION)
@@ -126,32 +135,6 @@ class AuditResult(BaseModel):
     details: List[AuditFeedback]
 
 # ----------- Core Logic ----------- #
-def audit_step(step: StepResult) -> AuditFeedback:
-    """
-    Evaluates a single agent's step for quality and correctness.
-
-    Parameters:
-        - step (StepResult): The result of one agent execution
-
-    Returns:
-        - AuditFeedback: Quality evaluation for the step
-
-    Initial State:
-        - Input step is received as JSON
-
-    Final State:
-        - Audit status and score are calculated
-
-    Water Cost:
-        - 0.5 waterdrops per call
-    """
-    if step.error:
-        return AuditFeedback(agent=step.agent, status="fail", comment=f"Error: {step.error}", score=0.0)
-    if not step.output:
-        return AuditFeedback(agent=step.agent, status="warning", comment="Empty output", score=0.3)
-    if isinstance(step.output, str) and len(step.output.strip()) < 10:
-        return AuditFeedback(agent=step.agent, status="warning", comment="Output too short", score=0.4)
-    return AuditFeedback(agent=step.agent, status="valid", comment="Looks good", score=0.95)
 
 # ----------- Endpoints ----------- #
 @app.get("/manifest")
@@ -277,28 +260,68 @@ def run_audit(trace: ExecutionTrace):
         - Mood is updated and water usage tracked
 
     Water Cost:
-        - 2 waterdrops per trace
+        - ~2 waterdrops per trace (LLM audit) or 2.0 if falling back to heuristics
     """
-    results = [audit_step(step) for step in trace.steps]
-    nb_valid = sum(1 for r in results if r.status == "valid")
-    nb_total = len(results)
+    # Convert Pydantic objects to plain dicts for the LLM tool
+    steps_payload = []
+    for s in trace.steps:
+        steps_payload.append({
+            "agent": s.agent,
+            "input": s.input,
+            "output": s.output,
+            "error": s.error,
+        })
 
-    status = "ok" if nb_valid == nb_total else "fail" if nb_valid == 0 else "partial"
-    summary = f"{nb_valid}/{nb_total} agents validated"
+    # Try LLM-based audit first if API key is present
+    api_key = license_keys.get("mistral")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="LLM API key for mistral not found, cannot perform audit")
 
+    try:
+
+        llm_result, llm_water = audit_trace_with_mistral(
+            {"steps": steps_payload},
+            api_key
+        )
+        # Expecting llm_result to contain keys: status, summary, details
+        status = llm_result.get("status", "partial")
+        summary = llm_result.get("summary", "n/a")
+        details_list = llm_result.get("details", [])
+
+        # Convert detail dicts into AuditFeedback models safely
+        details_models = []
+        for d in details_list:
+            details_models.append(
+                AuditFeedback(
+                    agent=d.get("agent", "unknown"),
+                    status=d.get("status", "warning"),
+                    comment=d.get("comment", ""),
+                    score=float(d.get("score", 0.0)),
+                )
+            )
+
+        water_used = float(llm_water or 2.0)
+
+        result_model = AuditResult(
+            status=status,
+            summary=summary,
+            details=details_models,
+        )
+        result_model.summary = f"[LLM] {result_model.summary}"
+        print(f"[auditor] LLM audit used; waterdrops={water_used}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM audit failed: {str(e)}")
+
+    # Update mood and persist
     mood["current_mood"] = "active"
-    mood["last_check"] = summary
-
+    mood["last_check"] = result_model.summary
     with open("mood.json", "w") as mood_file:
         json.dump(mood, mood_file)
 
-    increment_aiwaterdrops(2.0)
+    # Track waterdrops
+    increment_aiwaterdrops(water_used)
 
-    return AuditResult(
-        status=status,
-        summary=summary,
-        details=results
-    )
+    return result_model
 
 
 @app.post("/execute")
