@@ -543,6 +543,50 @@ def get_all_agent_manifests():
     }
 
 # ----------- Planning & Execution ----------- #
+
+def _extract_step_lines(plan_text: str) -> list:
+    """
+    Pull only well-formed step lines like "1. agent → capability" from an LLM plan.
+    """
+    lines = []
+    for raw in (plan_text or "").splitlines():
+        s = raw.strip()
+        if re.match(r"^\d+\.\s*\w+\s*→\s*\w+$", s):
+            lines.append(s)
+    return lines
+
+
+def _filter_registered_steps(step_lines: list, registry: dict) -> list:
+    """
+    Keep only steps whose agent is registered and capability is advertised in its manifest.
+    """
+    filtered = []
+    for s in step_lines:
+        m = re.match(r"^\d+\.\s*(\w+)\s*→\s*(\w+)$", s)
+        if not m:
+            continue
+        agent, cap = m.groups()
+        agent_entry = registry.get(agent)
+        if not agent_entry:
+            continue
+        caps = agent_entry.get("manifest", {}).get("capabilities", [])
+        cap_names = {(c["name"] if isinstance(c, dict) else c) for c in caps if isinstance(c, (dict, str))}
+        if cap in cap_names:
+            filtered.append(s)
+    return filtered
+
+
+
+def _sanitize_plan_output(raw_plan: str, registry: dict) -> str:
+    """
+    Normalize and sanitize an LLM plan: strip prose, keep valid steps, and ensure at least one.
+    """
+    steps = _extract_step_lines(raw_plan)
+    steps = _filter_registered_steps(steps, registry)
+    if not steps:
+        raise RuntimeError("No executable steps found for the current registry.")
+    return "\n".join(steps)
+
 def generate_plan_from_goal(goal: str) -> str:
     """
     Summary:
@@ -570,18 +614,32 @@ def generate_plan_from_goal(goal: str) -> str:
     try:
         plan, water_cost = generate_plan_with_mistral(goal, agents_registry, license_keys)
         increment_aiwaterdrops(water_cost)
+
+        # NEW: let the LLM explicitly refuse unsupported goals
+        upper = plan.strip().upper()
+        if upper.startswith("UNSUPPORTED"):
+            # Extract a human reason after the '|', if present
+            reason = plan.split("|", 1)[1].strip() if "|" in plan else "Goal unsupported by current agents."
+            # Surface as 422 so clients can handle gracefully
+            raise HTTPException(status_code=422, detail=f"Unsupported goal: {reason}")
+
+        # Coerce plan to string
         if isinstance(plan, list):
-            return "\n".join(map(str, plan))
-        elif isinstance(plan, str):
-            return plan
-        else:
+            plan = "\n".join(map(str, plan))
+        elif not isinstance(plan, str):
             raise RuntimeError(f"Invalid plan format: expected str or list, got {type(plan)}")
+
+        clean_plan = _sanitize_plan_output(plan, agents_registry)
+        return clean_plan
+    except HTTPException:
+        # let 422 pass through unchanged
+        raise
     except Exception as plan_error:
         raise RuntimeError(f"Plan generation failed: {plan_error}")
 
 
 @app.post("/plan")
-def plan_goal(request: dict):
+def plan_goal(payload: dict):
     """
     Summary:
         Generate a ClearCoreAI execution plan from a given goal string.
@@ -604,14 +662,18 @@ def plan_goal(request: dict):
     Water Cost:
         3 waterdrops (delegates to LLM plan generation)
     """
-    goal =  request.get("goal")
+    goal = payload.get("goal")
     if not goal:
         raise HTTPException(status_code=400, detail="Missing 'goal' field.")
     try:
-        plan = generate_plan_from_goal(goal)
-        return {"goal": goal, "plan": plan}
-    except Exception as planning_error:
-        raise HTTPException(status_code=500, detail=str(planning_error))
+        plan = generate_plan_from_goal(goal)  # may raise HTTPException 422
+        result = execute_plan_string(plan)
+        return {"goal": goal, "plan": plan, "result": result}
+    except HTTPException as http_err:
+        # Do NOT wrap; propagate (e.g., 422 Unsupported)
+        raise http_err
+    except Exception as run_error:
+        raise HTTPException(status_code=500, detail=str(run_error))
 
 def execute_plan_string(plan: str) -> dict:
     """
@@ -694,15 +756,18 @@ def execute_plan_string(plan: str) -> dict:
 
             if custom_handler == "use_execution_trace":
                 # The agent consumes the full execution trace
-                payload_input = {"steps": [
-                    {
-                        "agent": r.get("agent"),
-                        "input": r.get("input_used"),
-                        "output": r.get("output"),
-                        "error": r.get("error"),
-                    }
-                    for r in results if "agent" in r
-                ]}
+                payload_input = {
+                    "steps": [
+                        {
+                            "agent": r.get("agent"),
+                            "input": r.get("input_used"),
+                            "output": r.get("output"),
+                            "error": r.get("error"),
+                        }
+                        for r in results
+                        if "agent" in r
+                    ]
+                }
 
             url = f"{agent['base_url']}/execute"
             payload = {"capability": capability, "input": payload_input}

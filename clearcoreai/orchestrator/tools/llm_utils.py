@@ -52,7 +52,9 @@ def generate_plan_with_mistral(goal: str, agents_registry: dict, license_keys: d
         license_keys (dict): API credentials containing the Mistral key.
 
     Returns:
-        tuple[str, int]: A step-by-step plan and its energy cost (in waterdrops).
+        Returns:
+        tuple[str, int]: Either a numbered plan or a single line starting with
+                         'UNSUPPORTED | <reason>'. Second item is waterdrops cost.
 
     Initial State:
         - 'goal' is a non-empty string
@@ -86,42 +88,40 @@ def generate_plan_with_mistral(goal: str, agents_registry: dict, license_keys: d
         capabilities = manifest.get("capabilities", [])
         caps = [c["name"] if isinstance(c, dict) and "name" in c else str(c) for c in capabilities]
         agent_list.append(f"- {name}: {', '.join(caps)}")
-    agent_description = "\n".join(agent_list)
+    agent_description = "\n".join(agent_list) if agent_list else "(no agents registered)"
 
     # ----------- Prompt Construction ----------- #
     system_prompt = f"""
     You are a planning assistant for an AI orchestration system.
-    Your task is to generate a strictly step-by-step execution plan to fulfill a user goal using ONLY the available agents and capabilities listed below.
+    You must generate a plan using ONLY the available agents/capabilities listed.
 
-    🧠 Available agents and their capabilities:
+    Available agents:
     {agent_description}
 
-    ⚠️ VERY IMPORTANT RULES:
-    - You must use ONLY the agents and capabilities listed above.
-    - Use the exact name of the agent as shown above.
-    - Use the exact name of the capability as shown above.
-    - The format of each step MUST be:
-
-      agent_name → capability_name
-
-    - NEVER invert the order. The agent MUST be on the left of the arrow (→), and the capability MUST be on the right.
-    - NEVER invent new agents or capabilities.
-    - NEVER add explanations, comments, or formatting outside the plan.
-
-    🎯 Your response must ONLY be the plan steps in this format:
-    1. agent_name → capability_name
-    2. agent_name → capability_name
-    3. agent_name → capability_name
+    Rules:
+    - Use ONLY agents/capabilities listed above.
+    - Exact syntax per step: "<agent> → <capability>".
+    - One step per line, numbered: "1. ...", "2. ...", etc.
+    - Do NOT add prose or comments around the plan.
+    - If the goal CANNOT be satisfied strictly with the available capabilities,
+      reply with EXACTLY ONE LINE in this format (no numbering):
+      UNSUPPORTED | short reason in the user's language.
     """
+    user_prompt = f"Goal: {goal}\nRespond either with a numbered plan OR 'UNSUPPORTED | reason'."
 
     # ----------- API Request ----------- #
+
     payload = {
         "model": "mistral-small",
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Goal: {goal}\n\nRespond strictly in the format above."}
+            {"role": "user", "content": user_prompt}
         ],
-        "temperature": 0.5
+        "temperature": 0.2
+    }
+    headers = {
+        "Authorization": f"Bearer {license_keys.get('mistral', '')}",
+        "Content-Type": "application/json"
     }
 
     headers = {
@@ -131,12 +131,18 @@ def generate_plan_with_mistral(goal: str, agents_registry: dict, license_keys: d
 
     # ----------- Remote Call + Water Accounting ----------- #
     try:
-        response = requests.post("https://api.mistral.ai/v1/chat/completions", headers=headers, json=payload)
-        response.raise_for_status()
-        result = response.json()
-        plan = result["choices"][0]["message"]["content"].strip()
-        return plan, 1
-    except requests.exceptions.RequestException as req_error:
-        raise Exception(f"Mistral API request failed: {req_error}")
-    except Exception as general_error:
-        raise Exception(f"Unexpected error during plan generation: {general_error}")
+        resp = requests.post("https://api.mistral.ai/v1/chat/completions", headers=headers, json=payload, timeout=30)
+        resp.raise_for_status()
+        result = resp.json()
+        content = result["choices"][0]["message"]["content"].strip()
+
+        # Allow explicit UNSUPPORTED signal from the LLM
+        if content.upper().startswith("UNSUPPORTED"):
+            # keep cost at 1 waterdrop for the planning call
+            return content, 1
+
+        return content, 1
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Mistral API request failed: {e}")
+    except Exception as e:
+        raise Exception(f"Unexpected error during plan generation: {e}")
