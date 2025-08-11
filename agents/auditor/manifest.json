@@ -1,0 +1,90 @@
+{
+  "name": "auditor",
+  "version": "0.1.0",
+  "description": "Audits the output of other ClearCoreAI agents based on execution traces and generates a structured quality report.",
+  "author": "ClearCoreAI Contributors",
+  "contact": "https://github.com/ClearCoreAI/clearcoreai",
+  "license": "MIT",
+
+  "capabilities": [
+    {
+      "name": "audit_trace",
+      "description": "Analyzes a complete execution trace and returns a detailed quality report.",
+      "custom_input_handler": "use_execution_trace",
+      "input_spec": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "type": "array",
+            "description": "List of steps to audit",
+            "items": {
+              "type": "object",
+              "properties": {
+                "agent": { "type": "string" },
+                "input": {},
+                "output": {},
+                "error": { "type": "string", "nullable": true }
+              },
+              "required": ["agent", "input", "output"]
+            }
+          }
+        },
+        "required": ["steps"]
+      },
+      "output_spec": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "summary": { "type": "string" },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "agent": { "type": "string" },
+                "status": { "type": "string" },
+                "comment": { "type": "string" },
+                "score": { "type": "number" }
+              },
+              "required": ["agent", "status", "comment", "score"]
+            }
+          }
+        },
+        "required": ["status", "summary", "details"]
+      }
+    }
+  ],
+
+  "required_dependencies": [],
+  "estimate_cost": {
+    "unit": "waterdrops",
+    "per_call": 2.0,
+    "per_second": 0.0
+  },
+  "mood_profile": {
+    "initial": "analytical",
+    "possible": ["analytical", "neutral"]
+  },
+  "memory_profile": {
+    "short_term": false,
+    "long_term": false,
+    "shared": false
+  },
+  "tools_profile": {
+    "uses_llm": false,
+    "external_apis": [],
+    "internal_tools": []
+  },
+  "usage_guidelines": {
+    "intended_use": "Verifies that each agent in a pipeline produces meaningful and error-free output.",
+    "limitations": "Currently relies only on simple heuristics. Does not detect subtle hallucinations or advanced logic flaws.",
+    "safety_notes": "Operates entirely on local traces. No sensitive or external data access."
+  },
+
+  "multi_capability_api": {
+    "endpoint": "/execute",
+    "method": "POST"
+  },
+
+  "tags": ["agent", "audit", "validation", "pipeline", "quality"]
+}

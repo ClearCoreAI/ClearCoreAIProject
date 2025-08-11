@@ -86,6 +86,51 @@ except FileNotFoundError:
 except Exception as template_error:
     raise RuntimeError(f"Could not load manifest_template.json: {template_error}")
 
+# -------------- Helper functions -------------#
+
+def safe_json(obj, max_depth=6):
+    """
+    Summary:
+        Produce a JSON-safe, acyclic structure from arbitrary Python objects.
+
+    Parameters:
+        obj (Any): Any Python object.
+        max_depth (int): Hard cap to avoid deep recursion.
+
+    Returns:
+        Any: A structure made only of dict/list/str/float/int/bool/None.
+
+    Notes:
+        - dict keys are coerced to strings
+        - non-serializable leaves are converted to str(obj)
+        - truncates depth to prevent cycles / runaway nesting
+    """
+    if max_depth <= 0:
+        return str(obj)
+
+    # Primitives pass through
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+
+    # Lists/Tuples
+    if isinstance(obj, (list, tuple)):
+        return [safe_json(x, max_depth - 1) for x in obj]
+
+    # Dicts — coerce keys to str
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            sk = k if isinstance(k, str) else str(k)
+            out[sk] = safe_json(v, max_depth - 1)
+        return out
+
+    # Try direct JSON serialization; if it fails, fallback to string
+    try:
+        json.dumps(obj)
+        return obj
+    except Exception:
+        return str(obj)
+
 # ----------- Internal Utilities ----------- #
 def _load_agents() -> dict:
     """
@@ -274,14 +319,49 @@ def register_agent(agent: AgentRegistration):
     except Exception as json_error:
         raise HTTPException(status_code=400, detail=f"Invalid JSON from /manifest: {json_error}")
 
+    # ➤ Normalize capabilities: accept ["cap"], [{"name": "cap"}], or { "cap": "desc" }
+    raw_caps = manifest.get("capabilities", [])
+    normalized_caps = []
+    if isinstance(raw_caps, list):
+        for cap in raw_caps:
+            if isinstance(cap, str):
+                normalized_caps.append({"name": cap, "description": ""})
+            elif isinstance(cap, dict):
+                name = cap.get("name") or cap.get("capability") or cap.get("id")
+                desc = cap.get("description", "")
+                custom = cap.get("custom_input_handler")
+                if name:
+                    item = {"name": name, "description": desc}
+                    if custom:
+                        item["custom_input_handler"] = custom
+                    normalized_caps.append(item)
+    elif isinstance(raw_caps, dict):
+        for k, v in raw_caps.items():
+            normalized_caps.append({"name": k, "description": str(v) if v is not None else ""})
+
+    manifest["capabilities"] = normalized_caps
+
     try:
         validate(instance=manifest, schema=manifest_template)
     except ValidationError as validation_error:
         raise HTTPException(status_code=400, detail=f"Manifest invalid: {validation_error.message}")
 
+    # ➤ Transform capabilities list into a structured dictionary
+    capabilities_dict = {}
+    for cap in manifest.get("capabilities", []):
+        # cap is guaranteed to be a dict after normalization above
+        name = cap.get("name")
+        if name:
+            capabilities_dict[name] = {
+                "description": cap.get("description", ""),
+                "custom_input_handler": cap.get("custom_input_handler")
+            }
+
+    # ➤ Store full manifest but also structured capabilities for internal routing
     agents_registry[agent.name] = {
         "base_url": agent.base_url,
-        "manifest": manifest
+        "manifest": manifest,
+        "capabilities": capabilities_dict
     }
 
     try:
@@ -290,7 +370,6 @@ def register_agent(agent: AgentRegistration):
         raise HTTPException(status_code=500, detail=str(save_error))
     increment_aiwaterdrops(0.2)
     return {"message": f"Agent '{agent.name}' registered successfully."}
-
 @app.get("/agents")
 def list_agents():
     """
@@ -557,47 +636,115 @@ def execute_plan_string(plan: str) -> dict:
     Water Cost:
         ~0.02 waterdrops fixed + full cost of each /execute call per step (depends on agents)
     """
+    def _capabilities_for(agent_name: str) -> set:
+        caps = agents_registry.get(agent_name, {}).get("manifest", {}).get("capabilities", [])
+        names = set()
+        for c in caps:
+            if isinstance(c, dict) and "name" in c:
+                names.add(c["name"])
+            elif isinstance(c, str):
+                names.add(c)
+        return names
+
+    def _clean_input(ctx):
+        # Drop meta keys that downstream agents don’t care about
+        if isinstance(ctx, dict):
+            return {k: v for k, v in ctx.items() if k not in ("waterdrops_used",)}
+        return ctx
+
     results = []
-    context = None
+    context = None                # last output of any step
+    business_context = None       # last output of a NON-meta step
 
-    for step in plan.splitlines():
-        step = step.strip()
-        if not step or step.startswith("#"):
+    for raw in plan.splitlines():
+        step_line = raw.strip()
+        if not step_line or step_line.startswith("#"):
             continue
 
-        match = re.match(r"^\d+\.\s*(\w+)\s*→\s*(\w+)$", step)
-        if not match:
-            results.append({"step": step, "error": "Unrecognized format"})
+        m = re.match(r"^\d+\.\s*(\w+)\s*→\s*(\w+)$", step_line)
+        if not m:
+            results.append({"step": step_line, "error": "Unrecognized format"})
             continue
 
-        agent_name, capability = match.groups()
+        agent_name, capability = m.groups()
         agent = agents_registry.get(agent_name)
         if not agent:
-            results.append({"step": step, "error": f"Agent '{agent_name}' not registered"})
+            results.append({"step": step_line, "error": f"Agent '{agent_name}' not registered"})
+            continue
+
+        # Skip steps whose capability isn’t declared in the agent manifest
+        available = _capabilities_for(agent_name)
+        if capability not in available:
+            results.append({
+                "step": step_line,
+                "agent": agent_name,
+                "capability": capability,
+                "skipped": True,
+                "reason": "Capability not advertised by agent manifest"
+            })
             continue
 
         try:
-            input_data = context
-            if capability == "structured_output_generation" and isinstance(context, dict):
-                summaries = context.get("summaries")
-                if summaries:
-                    input_data = {"summaries": summaries}
+            payload_input = _clean_input(context)
+
+            # Detect meta-capability via custom_input_handler
+            manifest_caps = agents_registry[agent_name]["manifest"].get("capabilities", [])
+            cap_obj = next((c for c in manifest_caps if isinstance(c, dict) and c.get("name") == capability), None)
+            custom_handler = cap_obj.get("custom_input_handler") if isinstance(cap_obj, dict) else None
+
+            if custom_handler == "use_execution_trace":
+                # The agent consumes the full execution trace
+                payload_input = {"steps": [
+                    {
+                        "agent": r.get("agent"),
+                        "input": r.get("input_used"),
+                        "output": r.get("output"),
+                        "error": r.get("error"),
+                    }
+                    for r in results if "agent" in r
+                ]}
 
             url = f"{agent['base_url']}/execute"
-            payload = {"capability": capability, "input": input_data}
-            execution_response = requests.post(url, json=payload, timeout=30)
-            execution_response.raise_for_status()
-            context = execution_response.json()
-            results.append({"step": step, "output": context})
-        except Exception as execution_error:
-            results.append({"step": step, "error": str(execution_error)})
+            payload = {"capability": capability, "input": payload_input}
+            resp = requests.post(url, json=payload, timeout=30)
+            resp.raise_for_status()
+            out = resp.json()
+
+            results.append({
+                "step": step_line,
+                "agent": agent_name,
+                "capability": capability,
+                "input_used": payload_input if payload_input is not None else {},
+                "output": out,
+                "error": None
+            })
+
+            # Always update the raw last context
+            context = out
+            # Only update business_context for NON-meta steps
+            if custom_handler != "use_execution_trace":
+                business_context = out
+
+        except Exception as e:
+            results.append({
+                "step": step_line,
+                "agent": agent_name,
+                "capability": capability,
+                "input_used": payload_input if 'payload_input' in locals() else None,
+                "output": None,
+                "error": str(e)
+            })
             break
 
     increment_aiwaterdrops(0.02)
+
+    # Pick the last non-meta output if available, otherwise fall back to the raw last output
+    final_context = business_context if business_context is not None else context
+
     return {
-        "plan": plan,
-        "execution": results,
-        "final_output": context
+        "trace": results,
+        "final_output": final_context,
+        "total_waterdrops_used": final_context.get("waterdrops_used", 0.0) if isinstance(final_context, dict) else 0.0
     }
 
 @app.post("/execute_plan")

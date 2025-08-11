@@ -24,3 +24,12 @@ services:
       - "8600:8600"  # Exposes summarize_articles agent on localhost:8600
     depends_on:
       - orchestrator  # Summarizer also needs orchestrator running
+
+  # 🕵️ Auditor Agent: checks that other agents behaved correctly
+  auditor:
+    build:
+      context: agents/auditor
+    ports:
+      - "8700:8700"  # Exposes auditor agent on localhost:8700
+    depends_on:
+      - orchestrator

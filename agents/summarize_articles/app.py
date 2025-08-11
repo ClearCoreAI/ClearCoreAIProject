@@ -27,26 +27,28 @@ Final State:
 - Mood state is updated and persisted
 - Waterdrop usage is tracked per summary and exposed via `/metrics`
 
-Version: 0.2.1
+Version: 0.2.2
 Validated by: Olivier Hays
 Date: 2025-06-20
 
 Estimated Water Cost:
 - 1 waterdrop per /health call
-- ~2 waterdrops per /summarize call (variable per article count)
+- variable per /summarize and /execute structured summarization (depends on articles)
 - 0.02 waterdrops per /execute dispatch
 """
 
 # ----------- Imports ----------- #
 import json
 import time
+from typing import Any, Dict, List
+
 from fastapi import FastAPI, HTTPException, Request
 from tools.llm_utils import summarize_with_mistral
 from tools.water import increment_aiwaterdrops, load_aiwaterdrops, get_aiwaterdrops
 
 # ----------- Constants ----------- #
 AGENT_NAME = "summarize_articles"
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 
 # ----------- Credentials ----------- #
 # LLM Key
@@ -66,15 +68,42 @@ try:
     with open("mood.json", "r") as mood_json:
         mood = json.load(mood_json)
 except FileNotFoundError:
+    # Use a single, consistent key across the app: current_mood
     mood = {"current_mood": "neutral", "last_summary": None}
 
 # Current water consumption
 aiwaterdrops_consumed = load_aiwaterdrops()
 
 # ----------- Helper Functions ----------- #
+def _coerce_articles(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Summary:
+        Extract articles from supported input shapes.
+
+    Parameters:
+        payload (dict): Incoming input dict from the orchestrator.
+
+    Returns:
+        list[dict]: List of article objects with at least a 'content' field.
+
+    Notes:
+        - Supports:
+          * {"articles": [ {title?, content, ...}, ... ]}
+          * {"collection": {"items": [ ... ]}}
+    """
+    if isinstance(payload, dict):
+        if isinstance(payload.get("articles"), list):
+            return payload["articles"]
+        collection = payload.get("collection")
+        if isinstance(collection, dict) and isinstance(collection.get("items"), list):
+            return collection["items"]
+    return []
+
+
 def generate_summaries(payload: dict) -> dict:
     """
-    Generates summaries for a batch of articles using the Mistral LLM.
+    Summary:
+        Generates summaries for a batch of articles using the Mistral LLM.
 
     Parameters:
         payload (dict): A dictionary with either `articles` or `collection.items`
@@ -94,17 +123,19 @@ def generate_summaries(payload: dict) -> dict:
         HTTPException: If input is invalid or summarization fails
 
     Water Cost:
-        - 2 waterdrops per article (fixed estimate)
+        - variable (returned by summarize_with_mistral per article)
     """
-    articles = payload.get("articles") or payload.get("collection", {}).get("items", [])
-    summaries = []
-    waterdrops_used = 0
+    articles = _coerce_articles(payload)
+    if not isinstance(articles, list):
+        raise HTTPException(status_code=422, detail="Input must contain 'articles' (list) or 'collection.items' (list).")
+
+    summaries: List[str] = []
+    waterdrops_used: float = 0.0
 
     for article in articles:
+        if not isinstance(article, dict) or "content" not in article:
+            raise HTTPException(status_code=400, detail="Invalid article format: missing 'content' field.")
         try:
-            if not isinstance(article, dict) or "content" not in article:
-                raise HTTPException(status_code=400, detail="Invalid article format: missing 'content' field.")
-
             summary, waterdrops = summarize_with_mistral(
                 article.get("content", ""),
                 license_keys.get("mistral", "")
@@ -113,10 +144,11 @@ def generate_summaries(payload: dict) -> dict:
             raise HTTPException(status_code=400, detail=f"Failed to summarize article: {str(summarize_error)}")
 
         summaries.append(summary)
-        waterdrops_used += waterdrops
-        increment_aiwaterdrops(waterdrops)
+        waterdrops_used += float(waterdrops or 0)
+        increment_aiwaterdrops(float(waterdrops or 0))
 
-    mood["status"] = "active"
+    # Update mood consistently
+    mood["current_mood"] = "active"
     mood["last_summary"] = summaries[-1] if summaries else None
 
     with open("mood.json", "w") as file_out:
@@ -126,6 +158,7 @@ def generate_summaries(payload: dict) -> dict:
         "summaries": summaries,
         "waterdrops_used": waterdrops_used
     }
+
 
 # ----------- API Endpoints ----------- #
 
@@ -155,6 +188,7 @@ def get_manifest() -> dict:
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="manifest.json not found")
 
+
 @app.get("/health")
 def health() -> dict:
     """
@@ -174,13 +208,15 @@ def health() -> dict:
     """
     return {"status": "Summarize Articles Agent is up and running."}
 
+
 @app.get("/capabilities")
 def get_capabilities() -> dict:
     """
-    Loads and returns only the list of declared capabilities from the manifest.
+    Loads and returns only the list of declared capabilities from the manifest (update manifest to remove basic path if you want the orchestrator to stop planning it).
 
     Returns:
         dict: {"capabilities": [...]}
+        Reads from the manifest.json file.
 
     Initial State:
         - manifest.json is present
@@ -197,6 +233,7 @@ def get_capabilities() -> dict:
     with open("manifest.json", "r") as manifest_json:
         manifest = json.load(manifest_json)
     return {"capabilities": manifest.get("capabilities", [])}
+
 
 @app.post("/summarize")
 def summarize(payload: dict) -> dict:
@@ -216,51 +253,57 @@ def summarize(payload: dict) -> dict:
         - Summarization performed and mood updated
 
     Water Cost:
-        - 2 waterdrops per article
+        - variable per article
     """
     return generate_summaries(payload)
+
 
 @app.post("/execute")
 async def execute(request: Request) -> dict:
     """
-    Executes the agent's main capability: structured text summarization.
+    Executes declared capabilities for the agent.
 
     Parameters:
         request (Request): Incoming POST request with 'capability' and 'input' fields
 
     Returns:
-        dict: Structured summaries generated from the input articles
+        dict: Result structure defined by the capability
 
     Initial State:
-        - A valid Mistral API key is loaded from license_keys.json
+        - A valid Mistral API key is loaded from license_keys.json for LLM-backed ops
         - The input contains either 'articles' or 'collection.items'
 
     Final State:
-        - Articles are summarized
-        - Mood is updated and persisted
-        - Waterdrop usage is estimated and returned
+        - Structured LLM summarization is executed
+        - Mood and water usage are updated accordingly
 
     Raises:
         HTTPException: If capability is unrecognized or input is invalid
-        HTTPException: If an error occurs during summarization
 
     Water Cost:
-        - ~2 waterdrops per article (LLM usage)
+        - ~2 waterdrops per article for structured LLM summarization
         - +0.02 waterdrops per call (fixed dispatch overhead)
     """
     try:
         payload = await request.json()
         capability = payload.get("capability")
-        input_data = payload.get("input", {})
+        input_data = payload.get("input", {}) or {}
+
+        # Fixed dispatch overhead
+        increment_aiwaterdrops(0.02)
 
         if capability == "structured_text_summarization":
             return generate_summaries(input_data)
 
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown capability: {capability}")
+        raise HTTPException(status_code=400, detail=f"Unknown or disabled capability: {capability}. Only 'structured_text_summarization' is enabled.")
 
+    except HTTPException:
+        # Re-raise FastAPI HTTP errors unchanged
+        raise
     except Exception as execution_error:
+        # Wrap any unexpected exception
         raise HTTPException(status_code=500, detail=f"Execution failed: {str(execution_error)}")
+
 
 @app.get("/metrics")
 def get_metrics() -> dict:
@@ -280,7 +323,6 @@ def get_metrics() -> dict:
         - 0
     """
     uptime = int(time.time() - start_time)
-
     return {
         "agent": AGENT_NAME,
         "version": VERSION,
@@ -288,6 +330,7 @@ def get_metrics() -> dict:
         "current_mood": mood.get("current_mood", "unknown"),
         "aiwaterdrops_consumed": get_aiwaterdrops()
     }
+
 
 @app.get("/mood")
 def get_mood() -> dict:
@@ -307,6 +350,6 @@ def get_mood() -> dict:
         - 0
     """
     return {
-        "current_mood": mood.get("curent_mood", "unknown"),
+        "current_mood": mood.get("current_mood", "unknown"),
         "last_summary": mood.get("last_summary")
     }

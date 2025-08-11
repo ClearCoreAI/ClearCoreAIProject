@@ -73,7 +73,14 @@
   },
 
   "capabilities": [
-    "structured_text_summarization"
+    {
+      "name": "structured_text_summarization",
+      "description": "Summarizes articles into structured text using LLM."
+    },
+    {
+      "name": "basic_text_summarization",
+      "description": "Provides simple unstructured summaries of articles."
+    }
   ],
 
   "required_dependencies": [
