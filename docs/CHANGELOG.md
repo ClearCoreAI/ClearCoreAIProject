@@ -5,6 +5,25 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+# ## [0.3.4] – 2025-08-11
+**Integration of LLM-powered pipeline auditing and improved summarization**
+### Added
+- Integration of Mistral LLM in the `auditor` agent for in-depth, context-aware pipeline audits.
+- Updated `auditor` manifest and `/run` endpoint to handle LLM-based trace analysis.
+- Enhanced `summarize_articles` agent to prioritize Mistral-powered summarization over simplified heuristics.
+
+### Changed
+- Refactored orchestrator plan execution to handle auditor outputs consistently and remove duplicate traces.
+- Adjusted orchestrator error handling when no agent matches a user goal.
+
+### Fixed
+- Resolved incorrect capability recognition in `summarize_articles`.
+- Fixed input format issues when passing execution traces to the LLM auditor.
+
+### Documentation
+- Updated `README.md` for `auditor` and orchestrator to reflect new LLM audit feature.
+- Updated `QUICKSTART.txt` with examples including the auditor step.
+
 ## [0.3.3] – 2025-06-20
 
 **Improvement of the developer onboarding process**

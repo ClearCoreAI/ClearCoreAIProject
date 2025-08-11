@@ -2,7 +2,7 @@
 
 **Current Version:** 0.3.0  
 **Maintainer:** Olivier Hays  
-**Last Updated:** 2025-06-16
+**Last Updated:** 2025-08-11
 
 ---
 
@@ -11,6 +11,8 @@
 - Agent registration and manifest validation
 - Capability discovery via `/capabilities`
 - Planning via LLM (Mistral)
+- NO-PLAN detection for unsupported goals
+- LLM-powered agent auditing (Auditor agent with Mistral integration)
 - Sequential execution across agents
 - Context propagation between steps
 - Waterdrop-based energy accounting
@@ -24,7 +26,7 @@
 
 ### 🔍 Reduce Hallucinations
 - Constraint-based planning using schemas and hard type-checking
-- LLM guardrails and manifest-only reasoning
+- LLM guardrails and manifest-only reasoning (also apply to auditor outputs)
 - Add validation layers pre- and post-agent calls
 
 ### 📚 Automated Documentation
@@ -34,6 +36,7 @@
 
 ### 🧪 Agent Auditor
 - Dedicated agent to verify execution outputs from other agents
+- Auditor now uses LLM-based deep analysis; future work will expand heuristics and advanced consistency checks
 - Compares declared vs. observed behaviors
 - Provides audit trails and exception scoring
 
@@ -45,6 +48,7 @@
 ### 📈 Performance Tracing
 - End-to-end latency and cost reporting
 - Per-agent and per-capability stats
+- Audit scoring metrics
 - Optional logging to external tools (e.g., Prometheus, OpenTelemetry)
 
 ### 🔐 Encrypted Inter-Agent Communication
@@ -56,6 +60,7 @@
 - Refine granularity of waterdrop estimation per capability
 - Track cumulative and peak consumption per agent and per session
 - Introduce configurable cost models (e.g., based on payload size, latency, or token usage)
+- Include audit and planning costs
 - Expose detailed consumption via /metrics and optional billing module
 
 ### 🌐 Agent Visualization UI

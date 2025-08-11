@@ -140,22 +140,26 @@ class AuditResult(BaseModel):
 @app.get("/manifest")
 def get_manifest() -> dict:
     """
-    Returns the agent's manifest file to the orchestrator.
+    Returns the agent manifest loaded from disk.
+
+    Parameters:
+        None
 
     Returns:
-        - dict: Manifest contents
+        dict: Parsed contents of manifest.json.
 
     Initial State:
-        - manifest.json file must be present
+        - manifest.json file is present in the working directory
+        - File is readable and contains valid JSON
 
     Final State:
-        - Manifest is returned as JSON
+        - Manifest is returned unchanged to the caller
 
     Raises:
-        - HTTPException: If manifest file is missing
+        HTTPException: If manifest.json is missing (404)
 
     Water Cost:
-        - 0
+        - 0 waterdrops per call
     """
     try:
         with open("manifest.json", "r") as f:
@@ -166,32 +170,50 @@ def get_manifest() -> dict:
 @app.get("/health")
 def health() -> dict:
     """
-    Confirms the agent is alive and running.
+    Reports basic liveness/health information for the auditor agent.
+
+    Parameters:
+        None
 
     Returns:
-        - dict: Static health message
+        dict: A static health message indicating the service is running.
+
+    Initial State:
+        - Application has started successfully
+
+    Final State:
+        - A short status JSON is returned
+
+    Raises:
+        None
 
     Water Cost:
-        - 1 waterdrop
+        - 1 waterdrop per call
     """
     return {"status": "Auditor Agent is up and running."}
 
 @app.get("/capabilities")
 def get_capabilities() -> dict:
     """
-    Loads and returns the list of declared capabilities from the manifest.
+    Loads and returns the capabilities declared in the manifest.
+
+    Parameters:
+        None
 
     Returns:
-        - dict: {"capabilities": [...]}
+        dict: {"capabilities": <list from manifest.json>}
 
     Initial State:
-        - manifest.json must be readable
+        - manifest.json is present and readable
 
     Final State:
-        - List of capabilities is returned
+        - Extracted capabilities list is returned without modification
+
+    Raises:
+        HTTPException: If manifest.json cannot be found (404)
 
     Water Cost:
-        - 0
+        - 0 waterdrops per call
     """
     try:
         with open("manifest.json", "r") as manifest_file:
@@ -203,19 +225,26 @@ def get_capabilities() -> dict:
 @app.get("/metrics")
 def get_metrics() -> dict:
     """
-    Provides runtime and usage metrics for the agent.
+    Provides runtime metrics including uptime, mood, and water usage.
+
+    Parameters:
+        None
 
     Returns:
-        - dict: Uptime, mood, water usage and version
+        dict: Metrics snapshot with agent name, version, uptime_seconds, current_mood, and aiwaterdrops_consumed.
 
     Initial State:
-        - mood.json and aiwaterdrops.json are loaded
+        - Agent start_time is initialized
+        - Mood and water accounting are available
 
     Final State:
-        - Live snapshot is returned
+        - No persistent changes; a metrics JSON is returned
+
+    Raises:
+        None
 
     Water Cost:
-        - 0
+        - 0 waterdrops per call
     """
     uptime = int(time.time() - start_time)
     return {
@@ -229,13 +258,25 @@ def get_metrics() -> dict:
 @app.get("/mood")
 def get_mood() -> dict:
     """
-    Returns current mood status of the agent.
+    Returns the current mood state of the auditor.
+
+    Parameters:
+        None
 
     Returns:
-        - dict: Mood state and last evaluated result
+        dict: Current mood and the last audit summary reference.
+
+    Initial State:
+        - mood.json was loaded at startup (or defaulted)
+
+    Final State:
+        - No state change; mood snapshot is returned
+
+    Raises:
+        None
 
     Water Cost:
-        - 0
+        - 0 waterdrops per call
     """
     return {
         "current_mood": mood.get("current_mood", "unknown"),
@@ -245,22 +286,29 @@ def get_mood() -> dict:
 @app.post("/run", response_model=AuditResult)
 def run_audit(trace: ExecutionTrace):
     """
-    Executes the audit logic on a full execution trace.
+    Executes an LLM-based audit over a full execution trace.
 
     Parameters:
-        - trace (ExecutionTrace): List of steps from orchestrator
+        trace (ExecutionTrace): Validated list of pipeline steps to audit.
 
     Returns:
-        - AuditResult: Report with validation status per step
+        AuditResult: Structured audit status with summary and per-step details.
 
     Initial State:
-        - Steps are received and parsed
+        - A valid Mistral API key is available in license_keys.json
+        - The input trace has been validated by Pydantic
 
     Final State:
-        - Mood is updated and water usage tracked
+        - LLM is called to produce an audit judgment
+        - Mood is updated and persisted to mood.json
+        - Waterdrop usage is incremented
+
+    Raises:
+        HTTPException: If the LLM API key is missing (500)
+        HTTPException: If the LLM audit fails for any reason (500)
 
     Water Cost:
-        - ~2 waterdrops per trace (LLM audit) or 2.0 if falling back to heuristics
+        - ~2.0 waterdrops per audit (based on LLM usage)
     """
     # Convert Pydantic objects to plain dicts for the LLM tool
     steps_payload = []
@@ -327,25 +375,28 @@ def run_audit(trace: ExecutionTrace):
 @app.post("/execute")
 async def execute(request: Request) -> dict:
     """
-    Dispatches execution to the correct capability handler.
+    Dispatches the requested capability using the provided input payload.
 
     Parameters:
-        - request (Request): JSON request with 'capability' and 'input'
+        request (Request): HTTP request containing 'capability' and 'input' fields.
 
     Returns:
-        - dict: Result of the executed capability
+        dict: Result object for the executed capability (e.g., AuditResult as dict for 'audit_trace').
 
     Initial State:
-        - Auditor agent is registered and manifest is valid
+        - Agent is running and manifest declares the 'audit_trace' capability
+        - Input payload contains a known capability and well-formed input
 
     Final State:
-        - Matching capability is executed
+        - Matching handler is executed (currently only 'audit_trace')
+        - Successful output is returned as a plain dict
 
     Raises:
-        - HTTPException: If capability is unknown or input is invalid
+        HTTPException: If the capability is unknown (400)
+        HTTPException: If input validation fails during model parsing (422/500)
 
     Water Cost:
-        - 0.02 per dispatch
+        - 0.02 waterdrops per dispatch
     """
     payload = await request.json()
     capability = payload.get("capability")

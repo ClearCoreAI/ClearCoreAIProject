@@ -1,6 +1,6 @@
 # 🧪 ClearCoreAI Quickstart Guide (Local Testing)
 
-This quickstart explains how to locally test the **ClearCoreAI Orchestrator** and two agents (`fetch_articles` and `summarize_articles`) using `curl` commands and realistic data.
+This quickstart explains how to locally test the **ClearCoreAI Orchestrator** and three agents (`fetch_articles`, `summarize_articles`, and `auditor`) using `curl` commands and realistic data.
 
 ---
 
@@ -41,6 +41,7 @@ Wait until all three services are up, and optionally preload your `.txt` files i
 - `orchestrator` → :8000
 - `fetch_articles` → :8500
 - `summarize_articles` → :8600
+- `auditor` → :8700
 
 ---
 
@@ -60,9 +61,16 @@ curl -X POST http://localhost:8000/register_agent \
     "name": "summarize_articles",
     "base_url": "http://summarize_articles:8600"
 }' | jq
+
+curl -X POST http://localhost:8000/register_agent \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "auditor",
+    "base_url": "http://auditor:8700"
+}' | jq
 ```
 
-Expected: confirmation message and 0.2 waterdrop consumed per registration.
+Expected: confirmation message and 0.2 waterdrop consumed per registration per agent.
 
 ---
 
@@ -71,14 +79,14 @@ Expected: confirmation message and 0.2 waterdrop consumed per registration.
 ```bash
 curl -X POST http://localhost:8000/plan \
   -H "Content-Type: application/json" \
-  -d '{"goal": "fetch articles and summarize them"}' | jq
+  -d '{"goal": "fetch articles, summarize them, and audit the summary"}' | jq
 ```
 
 Expected output: numbered steps like:
 ```json
 {
-  "goal": "fetch articles and summarize them",
-  "plan": "1. fetch_articles → fetch_static_articles\n2. summarize_articles → structured_text_summarization"
+  "goal": "fetch articles, summarize them, and audit the summary",
+  "plan": "1. fetch_articles → fetch_static_articles\n2. summarize_articles → structured_text_summarization\n3. auditor → audit_summary"
 }
 ```
 
@@ -90,7 +98,7 @@ Expected output: numbered steps like:
 curl -X POST http://localhost:8000/execute_plan \
   -H "Content-Type: application/json" \
   -d '{
-    "plan": "1. fetch_articles → fetch_static_articles\n2. summarize_articles → structured_text_summarization"
+    "plan": "1. fetch_articles → fetch_static_articles\n2. summarize_articles → structured_text_summarization\n3. auditor → audit_summary"
 }' | jq
 ```
 
@@ -103,7 +111,7 @@ Expected: full trace of steps with inputs/outputs and final context.
 ```bash
 curl -X POST http://localhost:8000/run_goal \
   -H "Content-Type: application/json" \
-  -d '{"goal": "fetch articles and summarize them"}' | jq
+  -d '{"goal": "fetch articles, summarize them, and audit the summary"}' | jq
 ```
 
 This performs planning and execution in one request. Very useful for demos!
@@ -125,6 +133,10 @@ Expected fields:
   },
   "summarize_articles": {
     "aiwaterdrops_consumed": 0.6,
+    ...
+  },
+  "auditor": {
+    "aiwaterdrops_consumed": 0.3,
     ...
   }
 }
@@ -167,9 +179,10 @@ Expected:
   "breakdown": {
     "orchestrator": 6.0,
     "fetch_articles": 0.58,
-    "summarize_articles": 0.6
+    "summarize_articles": 0.6,
+    "auditor": 0.3
   },
-  "total_waterdrops": 7.18
+  "total_waterdrops": 7.48
 }
 ```
 

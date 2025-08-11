@@ -17,9 +17,10 @@ Whether you're building a research prototype or an industrial AI pipeline, Clear
 
 - ✅ Dynamic agent registration & manifest validation  
 - 🔁 Automated compatibility checks between agents  
-- 🧠 Natural language planning (via Mistral LLM)  
+- 🧠 Natural language planning (via Mistral LLM) with graceful error feedback for unsupported goals  
 - 📊 Transparent tracking of energy usage (in waterdrops)  
 - 📂 Persistent memory for reproducible orchestration  
+- 🔍 LLM-based audit support when the auditor agent is used, enabling advanced quality checks  
 
 Built with transparency, modularity and developer joy in mind.  
 

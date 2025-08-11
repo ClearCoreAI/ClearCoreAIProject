@@ -1,7 +1,7 @@
 # ClearCoreAI Orchestrator – Test Plan
 
-**Version:** 0.3.0  
-**Last Updated:** 2025-06-18  
+**Version:** 0.4.0  
+**Last Updated:** 2025-08-11  
 **Validated by:** Olivier Hays  
 
 ---
@@ -44,6 +44,7 @@
 **Endpoint:** `POST /plan`  
 - [ ] Valid goal returns non-empty plan  
 - [ ] Invalid goal or empty agent list returns error  
+- [ ] Invalid goal triggers NO-PLAN response with explanation  
 - [ ] LLM output follows strict step-by-step format  
 - [ ] Only registered agents and capabilities appear  
 - [ ] Water cost is recorded as 3 waterdrops  
@@ -57,6 +58,7 @@
 - [ ] Unknown agents trigger structured error  
 - [ ] Execution trace includes all steps and outputs  
 - [ ] Final output is returned and conforms to `output_spec`  
+- [ ] Auditor LLM audit runs correctly when enabled and matches expected schema  
 - [ ] Per-agent `waterdrops_used` values match manifest cost  
 
 ---
@@ -68,6 +70,7 @@
 - [ ] Waterdrop cost and full trace are returned  
 - [ ] Output includes summaries and optional structured summaries  
 - [ ] Error trace is returned if any step fails  
+- [ ] Returns exactly one audit output without duplication  
 
 ---
 
@@ -77,6 +80,7 @@
 - [ ] Returns orchestrator status and agent list  
 - [ ] Metrics from agents are correctly aggregated  
 - [ ] Handles slow or non-responsive agents gracefully  
+- [ ] Waterdrop usage from LLM-based audits is included in metrics  
 
 ---
 
@@ -88,6 +92,8 @@
 - [ ] LLM returns malformed plan  
 - [ ] Agent returns invalid JSON or fails mid-plan  
 - [ ] Circular dependencies in future DAGs (non-linear plans)  
+- [ ] Auditor manifest missing capabilities or invalid structure  
+- [ ] LLM audit returns malformed output  
 
 ---
 
