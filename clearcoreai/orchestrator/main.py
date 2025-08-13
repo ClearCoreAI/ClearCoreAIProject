@@ -547,22 +547,29 @@ def get_all_agent_manifests():
 def _extract_step_lines(plan_text: str) -> list:
     """
     Pull only well-formed step lines like "1. agent → capability" from an LLM plan.
+    Accepts both the Unicode arrow "→" and ASCII "->". Normalizes to "→".
     """
     lines = []
     for raw in (plan_text or "").splitlines():
         s = raw.strip()
-        if re.match(r"^\d+\.\s*\w+\s*→\s*\w+$", s):
-            lines.append(s)
+        # Accept "→" or "->"
+        m = re.match(r"^\s*\d+\.\s*([A-Za-z0-9_]+)\s*(?:→|->)\s*([A-Za-z0-9_\-:]+)\s*$", s)
+        if m:
+            agent, cap = m.groups()
+            # Normalize to the Unicode arrow to keep a consistent internal format
+            lines.append(f"{len(lines)+1}. {agent} → {cap}")
     return lines
 
 
 def _filter_registered_steps(step_lines: list, registry: dict) -> list:
     """
     Keep only steps whose agent is registered and capability is advertised in its manifest.
+    Accepts both the Unicode arrow "→" and ASCII "->". Normalizes to "→".
     """
     filtered = []
     for s in step_lines:
-        m = re.match(r"^\d+\.\s*(\w+)\s*→\s*(\w+)$", s)
+        s_norm = s.strip().replace("->", "→")
+        m = re.match(r"^\d+\.\s*([A-Za-z0-9_]+)\s*→\s*([A-Za-z0-9_\-:]+)$", s_norm)
         if not m:
             continue
         agent, cap = m.groups()
@@ -570,9 +577,10 @@ def _filter_registered_steps(step_lines: list, registry: dict) -> list:
         if not agent_entry:
             continue
         caps = agent_entry.get("manifest", {}).get("capabilities", [])
-        cap_names = {(c["name"] if isinstance(c, dict) else c) for c in caps if isinstance(c, (dict, str))}
+        cap_names = {(c["name"] if isinstance(c, dict) and "name" in c else c) for c in caps if isinstance(c, (dict, str))}
         if cap in cap_names:
-            filtered.append(s)
+            # Rebuild the line with normalized arrow to ensure consistent downstream parsing
+            filtered.append(re.sub(r"^\d+\.", f"{len(filtered)+1}.", f"{agent} → {cap}") if False else f"{len(filtered)+1}. {agent} → {cap}")
     return filtered
 
 
@@ -580,6 +588,7 @@ def _filter_registered_steps(step_lines: list, registry: dict) -> list:
 def _sanitize_plan_output(raw_plan: str, registry: dict) -> str:
     """
     Normalize and sanitize an LLM plan: strip prose, keep valid steps, and ensure at least one.
+    Accepts "→" and "->" and outputs normalized "→".
     """
     steps = _extract_step_lines(raw_plan)
     steps = _filter_registered_steps(steps, registry)
@@ -723,7 +732,9 @@ def execute_plan_string(plan: str) -> dict:
         if not step_line or step_line.startswith("#"):
             continue
 
-        m = re.match(r"^\d+\.\s*(\w+)\s*→\s*(\w+)$", step_line)
+        # Normalize ASCII arrow to Unicode for consistent handling
+        step_line = step_line.replace("->", "→")
+        m = re.match(r"^\d+\.\s*([A-Za-z0-9_]+)\s*→\s*([A-Za-z0-9_]+)$", step_line)
         if not m:
             results.append({"step": step_line, "error": "Unrecognized format"})
             continue

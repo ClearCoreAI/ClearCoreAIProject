@@ -76,10 +76,6 @@
     {
       "name": "structured_text_summarization",
       "description": "Summarizes articles into structured text using LLM."
-    },
-    {
-      "name": "basic_text_summarization",
-      "description": "Provides simple unstructured summaries of articles."
     }
   ],
 
@@ -121,6 +117,19 @@
     "method": "POST",
     "dispatches_capabilities": true
   },
+
+  "additional_endpoints": [
+    {
+      "name": "audit_policy",
+      "description": "Returns the JSON audit policy for this agent.",
+      "endpoint": "/audit_policy",
+      "method": "GET",
+      "output_spec": {
+        "type": "object",
+        "description": "Audit policy rules in JSON format."
+      }
+    }
+  ],
 
   "tags": ["summarization", "llm", "text", "agent", "mistral", "pipeline", "orchestration"]
 }

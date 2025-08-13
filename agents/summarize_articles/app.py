@@ -353,3 +353,148 @@ def get_mood() -> dict:
         "current_mood": mood.get("current_mood", "unknown"),
         "last_summary": mood.get("last_summary")
     }
+
+# ----------- Audit Policy Endpoint (generic) ----------- #
+import json
+import os
+from pathlib import Path
+from fastapi import HTTPException
+
+AUDIT_POLICY_FILE = Path("audit_policy.json")
+# Petit cache en mémoire pour éviter de relire le disque à chaque appel
+_AUDIT_POLICY_CACHE = {"mtime": None, "data": None}
+
+
+def _validate_audit_policy(policy: dict) -> None:
+    """
+    Validates a minimal schema for the agent's audit policy file.
+
+    Parameters:
+        policy (dict): Parsed JSON policy to validate.
+
+    Returns:
+        None: The function returns None if the policy is valid.
+
+    Initial State:
+        - `policy` is a Python dict obtained from audit_policy.json
+        - The dict may contain "rules", "scoring", and "meta" sections
+
+    Final State:
+        - The policy is guaranteed to include minimally valid structures
+          required by the auditor (e.g., a list of rules with ids/targets/asserts)
+
+    Raises:
+        HTTPException: 500 when the structure is invalid (missing keys or wrong types)
+
+    Water Cost:
+        - 0 waterdrops (pure in-memory checks)
+    """
+    if not isinstance(policy, dict):
+        raise HTTPException(status_code=500, detail="audit_policy.json must be a JSON object")
+
+    rules = policy.get("rules")
+    if not isinstance(rules, list) or len(rules) == 0:
+        raise HTTPException(status_code=500, detail="audit_policy.json: 'rules' must be a non-empty array")
+
+    # Validate each rule has minimal shape
+    for idx, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            raise HTTPException(status_code=500, detail=f"Rule #{idx} must be an object")
+        if "id" not in rule or not isinstance(rule["id"], str) or not rule["id"].strip():
+            raise HTTPException(status_code=500, detail=f"Rule #{idx} missing non-empty 'id'")
+        if "target" not in rule or not isinstance(rule["target"], str) or not rule["target"].strip():
+            raise HTTPException(status_code=500, detail=f"Rule #{idx} missing non-empty 'target'")
+        if "assert" not in rule or not isinstance(rule["assert"], dict):
+            raise HTTPException(status_code=500, detail=f"Rule #{idx} missing 'assert' object")
+
+    # Optional scoring block (when present)
+    scoring = policy.get("scoring")
+    if scoring is not None:
+        if not isinstance(scoring, dict):
+            raise HTTPException(status_code=500, detail="'scoring' must be an object when present")
+
+    # Optional meta block (free-form)
+    meta = policy.get("meta")
+    if meta is not None and not isinstance(meta, dict):
+        raise HTTPException(status_code=500, detail="'meta' must be an object when present")
+
+
+def _load_audit_policy() -> dict:
+    """
+    Loads and returns the agent's audit policy from disk with light validation and caching.
+
+    Parameters:
+        None
+
+    Returns:
+        dict: The parsed and validated audit policy JSON.
+
+    Initial State:
+        - `audit_policy.json` exists next to the agent's app.py
+        - File is UTF-8 and contains valid JSON
+
+    Final State:
+        - A valid policy dict is returned
+        - In-memory cache is populated for subsequent calls
+
+    Raises:
+        HTTPException: 404 if the file is missing
+        HTTPException: 500 on JSON decode error or schema validation error
+
+    Water Cost:
+        - 0 waterdrops (I/O only, no LLM)
+    """
+    if not AUDIT_POLICY_FILE.exists():
+        raise HTTPException(status_code=404, detail="audit_policy.json not found")
+
+    try:
+        mtime = AUDIT_POLICY_FILE.stat().st_mtime
+        # Return cached version if unchanged
+        if _AUDIT_POLICY_CACHE["mtime"] == mtime and _AUDIT_POLICY_CACHE["data"] is not None:
+            return _AUDIT_POLICY_CACHE["data"]
+
+        with AUDIT_POLICY_FILE.open("r", encoding="utf-8") as f:
+            policy = json.load(f)
+
+        _validate_audit_policy(policy)
+
+        _AUDIT_POLICY_CACHE["mtime"] = mtime
+        _AUDIT_POLICY_CACHE["data"] = policy
+        return policy
+
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"Invalid JSON in audit_policy.json: {str(e)}")
+    except HTTPException:
+        # Propager les erreurs déjà formées ci-dessus
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load audit_policy.json: {str(e)}")
+
+
+@app.get("/audit_policy")
+def get_audit_policy() -> dict:
+    """
+    Returns the agent-specific audit policy for the external auditor.
+
+    Parameters:
+        None
+
+    Returns:
+        dict: The validated content of `audit_policy.json`.
+
+    Initial State:
+        - `audit_policy.json` file is present alongside this app
+        - File content follows the minimal policy schema (rules[], optional scoring/meta)
+
+    Final State:
+        - A JSON policy is returned to the caller
+        - Policy content may be served from an in-memory cache when unchanged
+
+    Raises:
+        HTTPException: 404 if `audit_policy.json` is missing
+        HTTPException: 500 if JSON is invalid or schema checks fail
+
+    Water Cost:
+        - 0 waterdrops per call
+    """
+    return _load_audit_policy()

@@ -51,6 +51,14 @@
     }
   ],
 
+  "extra_endpoints": [
+    {
+      "name": "audit_policy",
+      "method": "GET",
+      "description": "Returns the JSON audit policy for this agent"
+    }
+  ],
+
   "required_dependencies": [],
 
   "estimate_cost": {

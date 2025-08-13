@@ -11,6 +11,7 @@ schema-conformant audit for a ClearCoreAI execution trace.
 Philosophy:
 - Entrées strictes et validées (liste de steps avec agent/input/output/error)
 - Sortie JSON strictement conforme au manifest de l'agent 'auditor'
+- Support des politiques d'audit par agent via execution_trace.policies + politique globale en fallback
 - Coercition et garde‑fous côté client (scores clampés, champs obligatoires)
 - Coût waterdrops déterministe par appel pour le suivi d’énergie
 
@@ -32,7 +33,7 @@ Estimated Water Cost:
 from __future__ import annotations
 import json
 import math
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 import requests
 
@@ -43,6 +44,7 @@ def audit_trace_with_mistral(
     api_key: str,
     model: str = "mistral-small",
     temperature: float = 0.2,
+    policy: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], float]:
     """
     Summary:
@@ -53,6 +55,11 @@ def audit_trace_with_mistral(
         api_key (str): Mistral API key (Bearer)
         model (str): Mistral model name
         temperature (float): Sampling temperature
+        policy (dict|None): Optional audit policy to guide the LLM and enforce post-rules.
+            Supported keys:
+              - min_score (float 0..1): if a detail score is below this, mark status as 'warning' and append a note.
+              - required_agents (list[str]): ensure each appears in details; otherwise add a warning entry.
+              - status_rules (dict): e.g., {"agent_name": {"if_error": "fail"}} to force status based on trace conditions.
 
     Returns:
         (audit: dict, waterdrops_used: float)
@@ -72,14 +79,35 @@ def audit_trace_with_mistral(
     """
     _validate_trace(execution_trace)
 
+    # Optional per-agent policies may be embedded by the orchestrator under execution_trace["policies"].
+    # Shape: {"agent_name": { ... rules ... }, "__global__": { ... rules ... }}
+    policies_by_agent: Optional[Dict[str, Any]] = None
+    try:
+        raw_policies = execution_trace.get("policies")
+        if isinstance(raw_policies, dict):
+            # Shallow copy to avoid mutating caller input
+            policies_by_agent = {str(k): v for k, v in raw_policies.items() if isinstance(v, dict)}
+    except Exception:
+        policies_by_agent = None
+
+    # Backward-compat global policy provided as function arg still supported
+    global_policy: Optional[Dict[str, Any]] = policy if isinstance(policy, dict) else None
+
     # Build compact, token-safe trace for the prompt
     compact_trace = _compact_trace(execution_trace, max_chars_per_field=800)
 
-    messages = _build_messages(compact_trace)
+    messages = _build_messages(compact_trace, global_policy, policies_by_agent)
     result = _call_mistral_chat(messages, api_key, model=model, temperature=temperature)
 
     # Force JSON parse + coercion to schema
     audit = _parse_and_coerce_audit_json(result)
+
+    # Apply optional global and per-agent policies deterministically
+    try:
+        audit = _apply_policy(audit, execution_trace, global_policy=global_policy, policies_by_agent=policies_by_agent)
+    except Exception:
+        # Fail-soft: keep LLM result if policy application crashes
+        pass
 
     # Deterministic waterdrop estimate (same spirit as your summarize util)
     steps = len(execution_trace.get("steps", []))
@@ -89,10 +117,15 @@ def audit_trace_with_mistral(
 
 
 # ---------------------------- Prompt Building --------------------------- #
-def _build_messages(compact_trace: Dict[str, Any]) -> List[Dict[str, str]]:
+def _build_messages(
+    compact_trace: Dict[str, Any],
+    global_policy: Optional[Dict[str, Any]] = None,
+    policies_by_agent: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, str]]:
     """
     Build strict messages for the chat.completions endpoint.
     The assistant MUST return JSON only, matching the schema in the manifest.
+    Supports optional global and per-agent policies to guide the LLM.
     """
     system = (
         "You are a rigorous pipeline auditor for ClearCoreAI. "
@@ -117,15 +150,56 @@ def _build_messages(compact_trace: Dict[str, Any]) -> List[Dict[str, str]]:
         "- 'score' reflects confidence [0.0..1.0].\n"
         "- Do NOT include extra keys or commentary outside JSON."
     )
+    policy_block = ""
+    if global_policy:
+        try:
+            gp_json = json.dumps(global_policy, ensure_ascii=False)
+        except Exception:
+            gp_json = "{}"
+        policy_block += "\n\nGlobal Audit Policy (MUST FOLLOW):\n" + gp_json + (
+            "\n- If a 'min_score' is provided, do not inflate scores; judge honestly.\n"
+            "- Prefer 'warning' over 'valid' when evidence is weak or outputs are too short."
+        )
+
+    if policies_by_agent:
+        try:
+            ap_json = json.dumps(_summarize_policies_for_prompt(policies_by_agent), ensure_ascii=False)
+        except Exception:
+            ap_json = "{}"
+        policy_block += "\n\nPer-Agent Policies (MUST FOLLOW):\n" + ap_json
+
     user = (
         "Here is the compact execution trace to audit. "
-        "Please follow the rules and return ONLY JSON:\n\n"
+        "Please follow the rules and return ONLY JSON:" + policy_block + "\n\n" +
         f"{json.dumps(compact_trace, ensure_ascii=False)}"
     )
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
+
+
+# ---------------------- Policy Summarization Helper ---------------------- #
+def _summarize_policies_for_prompt(policies_by_agent: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Produce a prompt-compact view of per-agent policies: keep only simple scalars and short lists.
+    """
+    summary: Dict[str, Any] = {}
+    for agent, pol in policies_by_agent.items():
+        if not isinstance(pol, dict):
+            continue
+        compact = {}
+        for k, v in pol.items():
+            if isinstance(v, (int, float, str, bool)):
+                compact[k] = v
+            elif isinstance(v, list) and len(v) <= 10:
+                compact[k] = [x for x in v if isinstance(x, (int, float, str, bool))][:10]
+            elif isinstance(v, dict):
+                # Keep shallow keys that are scalars
+                compact[k] = {sk: sv for sk, sv in v.items() if isinstance(sv, (int, float, str, bool))}
+        if compact:
+            summary[agent] = compact
+    return summary
 
 
 # ---------------------------- HTTP to Mistral --------------------------- #
@@ -308,3 +382,135 @@ def _preview(value: Any, max_chars: int) -> Any:
     # Fallback to string
     txt = str(value)
     return txt[:max_chars]
+
+
+# --------------------------- Policy Post-Processing --------------------------- #
+def _apply_policy(
+    audit: Dict[str, Any],
+    execution_trace: Dict[str, Any],
+    global_policy: Optional[Dict[str, Any]] = None,
+    policies_by_agent: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Apply lightweight, deterministic rules after the LLM response.
+
+    Supports global and per-agent policies:
+      - min_score (float 0..1)
+      - required_agents (list[str])
+      - status_rules: { agent_name: {"if_error": "fail"|"warning"} }
+      - Per-agent: min_score, required_output_keys, min_items, if_error, etc.
+    """
+    details = audit.get("details", [])
+
+    # Helper to locate or create a detail entry by agent
+    def _ensure_detail(a_name: str) -> Dict[str, Any]:
+        for d in details:
+            if d.get("agent") == a_name:
+                return d
+        d = {"agent": a_name, "status": "warning", "comment": "", "score": 0.2}
+        details.append(d)
+        return d
+
+    # Build quick lookup of outputs and errors from the execution trace per agent (last occurrence wins)
+    trace_by_agent = {}
+    for s in execution_trace.get("steps", []):
+        a = s.get("agent")
+        if not a:
+            continue
+        trace_by_agent[a] = {"output": s.get("output"), "error": s.get("error")}
+
+    # Apply GLOBAL policy first (backward compatible)
+    gp = global_policy or {}
+    min_score = gp.get("min_score") if isinstance(gp, dict) else None
+    if isinstance(min_score, (int, float)):
+        try:
+            min_score = float(min_score)
+        except Exception:
+            min_score = None
+    if isinstance(min_score, float):
+        for d in details:
+            if d.get("score", 1.0) < min_score and d.get("status") == "valid":
+                d["status"] = "warning"
+                d["comment"] = (d.get("comment") or "").rstrip() + " (below global min_score)"
+
+    # Required agents (global)
+    req_agents = gp.get("required_agents") if isinstance(gp, dict) else None
+    if isinstance(req_agents, list):
+        for a in req_agents:
+            if not any(d.get("agent") == a for d in details):
+                d = _ensure_detail(str(a))
+                d["status"] = "warning"
+                d["comment"] = (d.get("comment") or "") + "Missing from audit details per global policy."
+                d["score"] = min(d.get("score", 0.3), 0.3)
+
+    # Status rules based on presence of error in the trace (global)
+    status_rules = gp.get("status_rules") if isinstance(gp, dict) else None
+    if isinstance(status_rules, dict):
+        for a_name, rules in status_rules.items():
+            if not isinstance(rules, dict):
+                continue
+            if trace_by_agent.get(a_name, {}).get("error"):
+                rule = rules.get("if_error")
+                if rule in {"fail", "warning"}:
+                    d = _ensure_detail(a_name)
+                    d["status"] = rule
+                    d["comment"] = (d.get("comment") or "").rstrip() + " (policy: error observed)"
+
+    # Apply PER-AGENT policies
+    if isinstance(policies_by_agent, dict):
+        for a_name, pol in policies_by_agent.items():
+            if not isinstance(pol, dict):
+                continue
+            d = _ensure_detail(a_name)
+            out = trace_by_agent.get(a_name, {}).get("output")
+
+            # Agent-specific min_score
+            a_min = pol.get("min_score")
+            if isinstance(a_min, (int, float)):
+                try:
+                    a_min = float(a_min)
+                except Exception:
+                    a_min = None
+                if isinstance(a_min, float) and d.get("score", 1.0) < a_min and d.get("status") == "valid":
+                    d["status"] = "warning"
+                    d["comment"] = (d.get("comment") or "").rstrip() + " (below agent min_score)"
+
+            # Required output keys (shallow check)
+            req_keys = pol.get("required_output_keys")
+            if isinstance(req_keys, list) and isinstance(out, dict):
+                missing = [k for k in req_keys if k not in out]
+                if missing:
+                    d["status"] = "warning" if d.get("status") != "fail" else d.get("status")
+                    d["comment"] = (d.get("comment") or "") + f" Missing output keys: {missing}."
+                    d["score"] = min(d.get("score", 0.6), 0.6)
+
+            # Minimum items in array field, e.g., {"min_items": {"articles": 1}}
+            min_items = pol.get("min_items")
+            if isinstance(min_items, dict) and isinstance(out, dict):
+                for field, min_n in min_items.items():
+                    try:
+                        min_n = int(min_n)
+                    except Exception:
+                        continue
+                    val = out.get(field)
+                    if isinstance(val, list) and len(val) < min_n:
+                        d["status"] = "warning"
+                        d["comment"] = (d.get("comment") or "") + f" Field '{field}' has only {len(val)} items (< {min_n})."
+                        d["score"] = min(d.get("score", 0.5), 0.5)
+
+            # If error present and agent rule forces fail
+            if trace_by_agent.get(a_name, {}).get("error") and pol.get("if_error") in {"fail", "warning"}:
+                d["status"] = pol.get("if_error")
+                d["comment"] = (d.get("comment") or "").rstrip() + " (agent policy: error observed)"
+
+    # Recompute global status from details
+    statuses = {d.get("status") for d in details}
+    if "fail" in statuses:
+        audit["status"] = "fail"
+    elif "warning" in statuses:
+        audit["status"] = "partial"
+    else:
+        audit["status"] = "ok"
+
+    audit["details"] = details
+    return audit

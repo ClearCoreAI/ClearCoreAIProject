@@ -40,6 +40,8 @@ from pydantic import BaseModel
 from typing import Any, List, Optional
 from tools.water import increment_aiwaterdrops, load_aiwaterdrops, get_aiwaterdrops
 from tools.llm_utils import audit_trace_with_mistral
+import requests
+from urllib.parse import urlparse
 
 # ----------- Constants ----------- #
 AGENT_NAME = "auditor"
@@ -135,6 +137,159 @@ class AuditResult(BaseModel):
     details: List[AuditFeedback]
 
 # ----------- Core Logic ----------- #
+def _discover_agent_base_url(agent_name: str) -> Optional[str]:
+    """
+    Discovers an agent base URL from the local registry in memory, if available.
+
+    Parameters:
+        agent_name (str): The agent name as it appears in the execution trace.
+
+    Returns:
+        Optional[str]: The base URL (e.g., "http://summarize_articles:8600") or None if unknown.
+
+    Initial State:
+        - The auditor has no central registry; it relies on URLs seen in trace (if any) or environment.
+        - Optionally, the orchestrator could include 'base_url' inside step.input/output; not guaranteed.
+
+    Final State:
+        - Returns a best-effort URL or None. No network calls are made.
+
+    Raises:
+        None
+
+    Water Cost:
+        - 0 waterdrops
+    """
+    # NOTE: Sans orchestrator registry local, on ne peut pas garantir l’URL.
+    # Tu peux étendre cette fonction pour lire un mapping local (env var, fichier).
+    return None
+
+
+def _extract_possible_base_url_from_step(step: dict) -> Optional[str]:
+    """
+    Extracts a plausible agent base URL from a step payload if present.
+
+    Parameters:
+        step (dict): A dict containing 'agent', 'input', 'output', etc.
+
+    Returns:
+        Optional[str]: A base URL string if present in the step, else None.
+
+    Initial State:
+        - step may optionally contain hints like step['meta']['base_url'] or step['input']['_agent_base_url'].
+        - This is not a standard yet; it’s a best-effort extraction.
+
+    Final State:
+        - Returns a URL or None.
+
+    Raises:
+        None
+
+    Water Cost:
+        - 0 waterdrops
+    """
+    # Heuristics: check common locations where you might stash a base_url
+    meta = step.get("meta") or {}
+    url = meta.get("base_url")
+    if isinstance(url, str):
+        return url
+
+    # Optional: allow agents to echo their base_url in outputs for debugging
+    out = step.get("output") or {}
+    url = out.get("_agent_base_url")
+    if isinstance(url, str):
+        return url
+
+    # Optional: allow inputs to carry it
+    inn = step.get("input") or {}
+    url = inn.get("_agent_base_url")
+    if isinstance(url, str):
+        return url
+
+    return None
+
+
+def _fetch_audit_policy(base_url: str, timeout_secs: float = 3.0) -> Optional[dict]:
+    """
+    Fetches an agent's audit policy via its `/audit_policy` endpoint.
+
+    Parameters:
+        base_url (str): The base URL of the agent (e.g., "http://summarize_articles:8600")
+        timeout_secs (float): HTTP timeout in seconds
+
+    Returns:
+        Optional[dict]: Parsed JSON policy if successful; None if unavailable or invalid.
+
+    Initial State:
+        - The target agent exposes GET /audit_policy returning JSON.
+        - Network connectivity between auditor and agent is working.
+
+    Final State:
+        - Returns the policy dict or None (graceful failure).
+
+    Raises:
+        None (HTTP/network errors are swallowed and return None)
+
+    Water Cost:
+        - ~0 (monitoring/metadata fetch is free)
+    """
+    try:
+        resp = requests.get(f"{base_url}/audit_policy", timeout=timeout_secs)
+        resp.raise_for_status()
+        policy = resp.json()
+        if isinstance(policy, dict):
+            return policy
+    except Exception:
+        # Silently ignore; auditor will proceed without that policy
+        return None
+    return None
+
+
+def _build_agent_policy_map(steps: List[dict]) -> dict:
+    """
+    Builds a mapping {agent_name: policy_dict} by probing each unique agent in the trace.
+
+    Parameters:
+        steps (List[dict]): The execution steps (already converted to plain dicts)
+
+    Returns:
+        dict: A mapping of agent -> policy (only for agents where a policy was found)
+
+    Initial State:
+        - Steps contain agent names; base URLs may or may not be discoverable.
+
+    Final State:
+        - For each agent: try to resolve a base_url (from step hints or via discovery),
+          fetch /audit_policy, and store it if valid.
+
+    Raises:
+        None
+
+    Water Cost:
+        - ~0 (metadata calls)
+    """
+    policies = {}
+    seen = set()
+    for s in steps:
+        agent = s.get("agent")
+        if not agent or agent in seen:
+            continue
+        seen.add(agent)
+
+        # 1) Try to pick base_url from the step itself (meta, input, output)
+        base_url = _extract_possible_base_url_from_step(s)
+
+        # 2) If still unknown, try an internal discovery hook (extend as needed)
+        if not base_url:
+            base_url = _discover_agent_base_url(agent)
+
+        if not base_url:
+            continue  # cannot fetch policy for this agent
+
+        policy = _fetch_audit_policy(base_url)
+        if policy:
+            policies[agent] = policy
+    return policies
 
 # ----------- Endpoints ----------- #
 @app.get("/manifest")
@@ -310,7 +465,7 @@ def run_audit(trace: ExecutionTrace):
     Water Cost:
         - ~2.0 waterdrops per audit (based on LLM usage)
     """
-    # Convert Pydantic objects to plain dicts for the LLM tool
+    # Convert Pydantic models to plain dicts
     steps_payload = []
     for s in trace.steps:
         steps_payload.append({
@@ -320,23 +475,29 @@ def run_audit(trace: ExecutionTrace):
             "error": s.error,
         })
 
-    # Try LLM-based audit first if API key is present
     api_key = license_keys.get("mistral")
     if not api_key:
         raise HTTPException(status_code=500, detail="LLM API key for mistral not found, cannot perform audit")
 
+    # NEW: collect per-agent policies
     try:
+        agent_policies = _build_agent_policy_map(steps_payload)
+    except Exception as e:
+        # We keep this non-fatal: auditing still works without policies
+        agent_policies = {}
+        print(f"[auditor] Policy discovery failed (non-fatal): {e}")
 
-        llm_result, llm_water = audit_trace_with_mistral(
-            {"steps": steps_payload},
-            api_key
-        )
-        # Expecting llm_result to contain keys: status, summary, details
+    # Call LLM with policies
+    try:
+        llm_input = {
+            "steps": steps_payload,
+            "policies": agent_policies,  # may be {}
+        }
+        llm_result, llm_water = audit_trace_with_mistral(llm_input, api_key)
         status = llm_result.get("status", "partial")
         summary = llm_result.get("summary", "n/a")
         details_list = llm_result.get("details", [])
 
-        # Convert detail dicts into AuditFeedback models safely
         details_models = []
         for d in details_list:
             details_models.append(
@@ -349,24 +510,19 @@ def run_audit(trace: ExecutionTrace):
             )
 
         water_used = float(llm_water or 2.0)
+        result_model = AuditResult(status=status, summary=f"[LLM] {summary}", details=details_models)
+        print(f"[auditor] LLM audit used; waterdrops={water_used}, policies_attached={bool(agent_policies)}")
 
-        result_model = AuditResult(
-            status=status,
-            summary=summary,
-            details=details_models,
-        )
-        result_model.summary = f"[LLM] {result_model.summary}"
-        print(f"[auditor] LLM audit used; waterdrops={water_used}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM audit failed: {str(e)}")
 
-    # Update mood and persist
+    # Persist mood
     mood["current_mood"] = "active"
     mood["last_check"] = result_model.summary
     with open("mood.json", "w") as mood_file:
         json.dump(mood, mood_file)
 
-    # Track waterdrops
+    # Water accounting
     increment_aiwaterdrops(water_used)
 
     return result_model

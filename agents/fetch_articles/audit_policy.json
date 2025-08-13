@@ -1,0 +1,192 @@
+{
+  "meta": {
+    "agent": "fetch_articles",
+    "version": "0.2.0",
+    "owner": "ClearCoreAI",
+    "description": "Policy to validate outputs of fetch_articles across both capabilities: fetch_static_articles and generate_article_collection."
+  },
+
+  "scoring": {
+    "base": 1.0,
+    "deductions": {
+      "warning": 0.1,
+      "fail": 1.0
+    },
+    "aggregation": "min"
+  },
+
+  "rules": [
+    {
+      "id": "OUT-STRUCTURE-00",
+      "target": "output",
+      "assert": {
+        "any_of_present": ["articles", "collection.items"]
+      },
+      "severity": "fail",
+      "message": "Output must include either 'articles' or 'collection.items'."
+    },
+
+
+    {
+      "id": "OUT-ARTICLES-ARRAY-01",
+      "target": "output.articles",
+      "assert": {
+        "optional": true,
+        "type": "array",
+        "min_items": 1
+      },
+      "severity": "fail",
+      "message": "When 'articles' is present, it must be a non-empty array."
+    },
+    {
+      "id": "OUT-ARTICLE-FIELDS-02",
+      "target": "output.articles[]",
+      "assert": {
+        "type": "object",
+        "required_fields": ["title", "content"]
+      },
+      "severity": "fail",
+      "message": "Each article must include 'title' and 'content'."
+    },
+    {
+      "id": "OUT-ARTICLE-TITLE-QUALITY-03",
+      "target": "output.articles[].title",
+      "assert": {
+        "type": "string",
+        "min_length": 5
+      },
+      "severity": "warning",
+      "message": "Article titles should be at least 5 characters."
+    },
+    {
+      "id": "OUT-ARTICLE-CONTENT-QUALITY-04",
+      "target": "output.articles[].content",
+      "assert": {
+        "type": "string",
+        "min_length": 50
+      },
+      "severity": "warning",
+      "message": "Article content should be ≥ 50 characters."
+    },
+    {
+      "id": "OUT-ARTICLE-SOURCE-OPTIONAL-05",
+      "target": "output.articles[].source",
+      "assert": {
+        "optional": true,
+        "type": "string",
+        "min_length": 2
+      },
+      "severity": "warning",
+      "message": "When provided, 'source' should be a short non-empty string."
+    },
+    {
+      "id": "OUT-ARTICLES-NO-DUP-TITLES-06",
+      "target": "output.articles",
+      "assert": {
+        "no_duplicate_on": "title"
+      },
+      "severity": "warning",
+      "message": "Article titles should be unique in 'articles'."
+    },
+    {
+      "id": "OUT-ARTICLES-NO-PLACEHOLDERS-07",
+      "target": "output.articles[].content",
+      "assert": {
+        "none_match_regex": ["^ok$", "^n/a$", "^\\s*$"]
+      },
+      "severity": "warning",
+      "message": "Article content should not be placeholders like 'ok', 'n/a', or empty."
+    },
+
+    {
+      "id": "OUT-COLLECTION-OBJECT-10",
+      "target": "output.collection",
+      "assert": {
+        "optional": true,
+        "type": "object"
+      },
+      "severity": "fail",
+      "message": "When 'collection' is present, it must be an object."
+    },
+    {
+      "id": "OUT-COLLECTION-COUNT-11",
+      "target": "output.collection.count",
+      "assert": {
+        "optional": true,
+        "type": "integer",
+        "min": 1
+      },
+      "severity": "fail",
+      "message": "'collection.count' must be a positive integer when present."
+    },
+    {
+      "id": "OUT-COLLECTION-ITEMS-STRUCT-12",
+      "target": "output.collection.items",
+      "assert": {
+        "optional": true,
+        "type": "array",
+        "min_items": 1
+      },
+      "severity": "fail",
+      "message": "'collection.items' must be a non-empty array when present."
+    },
+    {
+      "id": "OUT-COLLECTION-COUNT-MATCH-13",
+      "target": "output.collection.count",
+      "assert": {
+        "equals_other_length": "output.collection.items"
+      },
+      "severity": "fail",
+      "message": "'collection.count' must match the number of items."
+    },
+    {
+      "id": "OUT-COLLECTION-ITEM-FIELDS-14",
+      "target": "output.collection.items[]",
+      "assert": {
+        "type": "object",
+        "required_fields": ["title", "content"]
+      },
+      "severity": "fail",
+      "message": "Each collection item must include 'title' and 'content'."
+    },
+    {
+      "id": "OUT-COLLECTION-ITEM-QUALITY-15",
+      "target": "output.collection.items[].content",
+      "assert": {
+        "type": "string",
+        "min_length": 50
+      },
+      "severity": "warning",
+      "message": "Each collection item content should be ≥ 50 characters."
+    },
+    {
+      "id": "OUT-COLLECTION-NO-DUP-TITLES-16",
+      "target": "output.collection.items",
+      "assert": {
+        "no_duplicate_on": "title"
+      },
+      "severity": "warning",
+      "message": "Item titles should be unique in 'collection.items'."
+    },
+    {
+      "id": "OUT-COLLECTION-NO-PLACEHOLDERS-17",
+      "target": "output.collection.items[].content",
+      "assert": {
+        "none_match_regex": ["^ok$", "^n/a$", "^\\s*$"]
+      },
+      "severity": "warning",
+      "message": "Item content should not be placeholders like 'ok', 'n/a', or empty."
+    },
+
+    {
+      "id": "CONSISTENCY-NEWS-LIKE-20",
+      "target": "output.articles[].title | output.collection.items[].title",
+      "assert": {
+        "should_be_headline_like": true,
+        "strategy": "heuristic"
+      },
+      "severity": "warning",
+      "message": "Titles should look like news headlines (not random strings)."
+    }
+  ]
+}

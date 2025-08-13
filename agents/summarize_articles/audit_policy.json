@@ -1,0 +1,134 @@
+{
+  "meta": {
+    "agent": "summarize_articles",
+    "version": "0.2.1",
+    "owner": "ClearCoreAI",
+    "description": "Policy to validate inputs/outputs of summarize_articles and catch common failure modes."
+  },
+
+  "scoring": {
+    "base": 1.0,
+    "deductions": {
+      "warning": 0.2,
+      "fail": 1.0
+    },
+    "aggregation": "min"
+  },
+
+  "rules": [
+    {
+      "id": "IN-STRUCTURE-01",
+      "target": "input",
+      "assert": {
+        "any_of_present": ["articles", "collection.items"]
+      },
+      "severity": "fail",
+      "message": "Input must provide either 'articles' or 'collection.items'."
+    },
+    {
+      "id": "IN-ARTICLES-NONEMPTY-02",
+      "target": "input.articles",
+      "assert": {
+        "optional": true,
+        "type": "array",
+        "min_items": 1
+      },
+      "severity": "fail",
+      "message": "When 'articles' is provided, it must be a non-empty array."
+    },
+    {
+      "id": "IN-COLLECTION-NONEMPTY-03",
+      "target": "input.collection.items",
+      "assert": {
+        "optional": true,
+        "type": "array",
+        "min_items": 1
+      },
+      "severity": "fail",
+      "message": "When 'collection.items' is provided, it must be a non-empty array."
+    },
+    {
+      "id": "IN-CONTENT-PRESENT-04",
+      "target": "input.articles[].content | input.collection.items[].content",
+      "assert": {
+        "type": "string",
+        "min_length": 20
+      },
+      "severity": "warning",
+      "message": "Each article must have non-empty 'content' (≥ 20 chars)."
+    },
+    {
+      "id": "IN-TITLE-OPTIONAL-05",
+      "target": "input.articles[].title | input.collection.items[].title",
+      "assert": {
+        "optional": true,
+        "type": "string",
+        "min_length": 1
+      },
+      "severity": "warning",
+      "message": "Titles, when provided, should be non-empty strings."
+    },
+
+    {
+      "id": "OUT-SUMMARIES-STRUCTURE-10",
+      "target": "output.summaries",
+      "assert": {
+        "required": true,
+        "type": "array",
+        "min_items": 1
+      },
+      "severity": "fail",
+      "message": "Output must include a non-empty 'summaries' array."
+    },
+    {
+      "id": "OUT-SUMMARY-LENGTH-11",
+      "target": "output.summaries[]",
+      "assert": {
+        "type": "string",
+        "min_length": 30
+      },
+      "severity": "warning",
+      "message": "Each summary should be at least 30 characters (too terse otherwise)."
+    },
+    {
+      "id": "OUT-COUNT-MATCH-12",
+      "target": "output.summaries",
+      "assert": {
+        "equals_other_length": "input.articles | input.collection.items"
+      },
+      "severity": "fail",
+      "message": "The number of summaries must match the number of input articles."
+    },
+    {
+      "id": "OUT-NO-RAW-PLACEHOLDERS-13",
+      "target": "output.summaries[]",
+      "assert": {
+        "none_match_regex": ["^ok$", "^n/a$", "^\\s*$"]
+      },
+      "severity": "warning",
+      "message": "Summaries should not be placeholders like 'ok', 'n/a' or empty."
+    },
+    {
+      "id": "OUT-WATERDROPS-OPTIONAL-14",
+      "target": "output.waterdrops_used",
+      "assert": {
+        "optional": true,
+        "type": "number",
+        "min": 0
+      },
+      "severity": "warning",
+      "message": "'waterdrops_used' should be a non-negative number when present."
+    },
+
+    {
+      "id": "CONSISTENCY-REFS-20",
+      "target": "output.summaries[]",
+      "assert": {
+        "should_reference_input": true,
+        "strategy": "llm"
+      },
+      "severity": "warning",
+      "message": "Summaries should reflect key ideas from the inputs (checked by LLM heuristic)."
+    }
+  ]
+}
