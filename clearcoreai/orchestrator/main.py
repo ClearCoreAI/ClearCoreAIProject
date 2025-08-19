@@ -780,11 +780,25 @@ def execute_plan_string(plan: str) -> dict:
                     ]
                 }
 
+            # Ensure the input we pass (and record) carries the agent base_url for auditing
+            if not isinstance(payload_input, dict) and payload_input is not None:
+                # if previous context wasn’t a dict, wrap it so we can attach the URL hint
+                payload_input = {"_value": payload_input}
+
+            if payload_input is None:
+                payload_input = {}
+
+            payload_input["_agent_base_url"] = agent["base_url"]
+
             url = f"{agent['base_url']}/execute"
             payload = {"capability": capability, "input": payload_input}
             resp = requests.post(url, json=payload, timeout=30)
             resp.raise_for_status()
             out = resp.json()
+
+            # Mirror the agent base_url into the output as well (helps the auditor either way)
+            if isinstance(out, dict):
+                out.setdefault("_agent_base_url", agent["base_url"])
 
             results.append({
                 "step": step_line,

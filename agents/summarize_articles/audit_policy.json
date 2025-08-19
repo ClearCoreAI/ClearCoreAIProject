@@ -20,7 +20,7 @@
       "id": "IN-STRUCTURE-01",
       "target": "input",
       "assert": {
-        "any_of_present": ["articles", "collection.items"]
+        "any_of_present": ["input.articles", "input.collection.items"]
       },
       "severity": "fail",
       "message": "Input must provide either 'articles' or 'collection.items'."

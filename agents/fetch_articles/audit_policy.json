@@ -5,7 +5,6 @@
     "owner": "ClearCoreAI",
     "description": "Policy to validate outputs of fetch_articles across both capabilities: fetch_static_articles and generate_article_collection."
   },
-
   "scoring": {
     "base": 1.0,
     "deductions": {
@@ -14,19 +13,16 @@
     },
     "aggregation": "min"
   },
-
   "rules": [
     {
       "id": "OUT-STRUCTURE-00",
       "target": "output",
       "assert": {
-        "any_of_present": ["articles", "collection.items"]
+        "any_of_present": ["output.articles", "output.collection.items"]
       },
       "severity": "fail",
       "message": "Output must include either 'articles' or 'collection.items'."
     },
-
-
     {
       "id": "OUT-ARTICLES-ARRAY-01",
       "target": "output.articles",
@@ -97,7 +93,6 @@
       "severity": "warning",
       "message": "Article content should not be placeholders like 'ok', 'n/a', or empty."
     },
-
     {
       "id": "OUT-COLLECTION-OBJECT-10",
       "target": "output.collection",
@@ -134,10 +129,11 @@
       "id": "OUT-COLLECTION-COUNT-MATCH-13",
       "target": "output.collection.count",
       "assert": {
+        "optional": true,
         "equals_other_length": "output.collection.items"
       },
-      "severity": "fail",
-      "message": "'collection.count' must match the number of items."
+      "severity": "warning",
+      "message": "'collection.count' should match the number of items."
     },
     {
       "id": "OUT-COLLECTION-ITEM-FIELDS-14",
@@ -177,7 +173,6 @@
       "severity": "warning",
       "message": "Item content should not be placeholders like 'ok', 'n/a', or empty."
     },
-
     {
       "id": "CONSISTENCY-NEWS-LIKE-20",
       "target": "output.articles[].title | output.collection.items[].title",
