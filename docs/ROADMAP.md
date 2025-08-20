@@ -1,6 +1,6 @@
 # ClearCoreAI Orchestrator – Roadmap
 
-**Current Version:** 0.3.0  
+**Current Version:** 0.3.3 
 **Maintainer:** Olivier Hays  
 **Last Updated:** 2025-08-11
 
@@ -17,7 +17,6 @@
 - Context propagation between steps
 - Waterdrop-based energy accounting
 - Mood and metric tracking
-- Agent introspection and orchestration readiness
 - FastAPI-based modular orchestrator
 
 ---
@@ -33,12 +32,6 @@
 - Auto-generate `README.md` and inline docstrings from manifests and code
 - CLI tool: `ccai docgen`
 - Support multilingual comments
-
-### 🧪 Agent Auditor
-- Dedicated agent to verify execution outputs from other agents
-- Auditor now uses LLM-based deep analysis; future work will expand heuristics and advanced consistency checks
-- Compares declared vs. observed behaviors
-- Provides audit trails and exception scoring
 
 ### 🔀 Non-Linear Pipelines (Graph Execution)
 - Support for DAG-style agent workflows
