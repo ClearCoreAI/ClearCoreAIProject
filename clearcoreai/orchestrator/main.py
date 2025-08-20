@@ -1,38 +1,80 @@
 """
 Module: orchestrator
 Component: Central Orchestrator API for ClearCoreAI
+Purpose: Register agents, validate manifests, plan with LLM, and execute multi-agent workflows.
 
 Description:
-This orchestrator acts as the central coordinator for ClearCoreAI agents.
-It supports agent registration, dynamic capability discovery, manifest validation,
-execution planning, and persistent memory of connected agents.
+This service is the central coordinator for ClearCoreAI agents. It lets you:
+- Register agents (and persist them) after validating their manifest against a schema
+- Discover capabilities dynamically from each agent’s manifest
+- Generate an executable plan from a natural-language goal via the Mistral LLM
+- Execute that plan step-by-step, building a full execution trace
+- Aggregate basic metrics and water usage
 
-Philosophy:
-- Agents declare capabilities via manifest.json
-- Agent connectivity and compatibility are analyzed dynamically
-- Orchestrator drives plan-based execution and centralized monitoring
+How it works (end-to-end call flow):
+1) Agent Registration
+   - Client → POST /register_agent {name, base_url}
+   - Orchestrator → GET {base_url}/manifest
+   - Normalize capabilities, validate against manifest_template.json
+   - Persist to agents.json (registry)
+
+2) Planning
+   - Client → POST /plan {goal} or /run_goal {goal}
+   - Orchestrator → tools.llm_utils.generate_plan_with_mistral(goal, agents_registry, license_keys)
+   - LLM returns numbered steps like "1. agent → capability"
+   - Plan text is sanitized to keep only valid (agent, capability) pairs
+
+3) Execution
+   - Orchestrator iterates steps and POSTs to each agent’s /execute with:
+       { "capability": ..., "input": { previous_context..., "_agent_base_url": agent.base_url } }
+   - Collects outputs and errors into a structured execution trace
+   - If an agent declares a custom_input_handler == "use_execution_trace", it receives the entire prior trace
+
+4) Auditing (optional in plan)
+   - If the plan ends with an audit step (e.g., auditor → audit_trace), the auditor agent will get the whole trace
+     including input_used + output for each step, enabling policy-based or LLM-based audits.
 
 Initial State:
-- Loads agents.json if it exists
-- Loads manifest_template.json to validate agent capabilities
+- license_keys.json exists and contains a valid Mistral API key
+- manifest_template.json exists to validate agent manifests
+- agents.json may or may not exist (registry loads empty if absent)
 
 Final State:
-- Runs a REST API to register agents, generate execution plans, and coordinate workflows
+- A REST API runs to register agents, generate/execute plans, and surface metrics
+- agents.json contains persistent registry
+- Execution endpoints return a full trace with per-step inputs/outputs
 
 Exceptions handled:
-- FileNotFoundError — if persistent memory or template is missing
-- HTTPException — for invalid inputs or unreachable agents
-- ValidationError — for schema mismatches in agent manifests
-- RuntimeError — for startup failures or persistence errors
+- FileNotFoundError — missing template/credentials at startup
+- HTTPException — invalid inputs, unreachable agents, or unexpected runtime conditions
+- ValidationError — manifest schema violations
+- RuntimeError — persistence or planning failures
 
 Estimated Water Cost:
 - 0.2 waterdrops per registration
 - 0.05 waterdrops per listing
-- 3 waterdrops per planning
+- 3 waterdrops per planning (plus execution costs per agent)
 
 Validated by: Olivier Hays
 Date: 2025-06-20
 Version: 0.3.3
+
+----------------------------------------------------------------------
+Quick examples:
+
+# Register an agent
+curl -s -X POST http://localhost:8000/register_agent \
+  -H "Content-Type: application/json" \
+  -d '{"name":"summarize_articles","base_url":"http://summarize_articles:8600"}'
+
+# Plan + Execute a goal in one call
+curl -s -X POST http://localhost:8000/run_goal \
+  -H "Content-Type: application/json" \
+  -d '{"goal":"Fetch articles about AI and summarize them with a quality audit"}' | jq
+
+# Inspect registry
+curl -s http://localhost:8000/agents | jq
+----------------------------------------------------------------------
 """
 
 # ----------- Imports ----------- #
@@ -52,7 +94,7 @@ AGENTS_FILE = ROOT / "agents.json"
 TEMPLATE_FILE = ROOT / "manifest_template.json"
 AGENT_DIR = ROOT / "agents"
 LICENSE_FILE = ROOT / "license_keys.json"
-AIWATERDROPS_FILE  = ROOT / "memory" / "short_term" / "aiwaterdrops.json"
+AIWATERDROPS_FILE = ROOT / "memory" / "short_term" / "aiwaterdrops.json"
 VERSION = "0.3.3"
 
 # ----------- Credentials ----------- #
@@ -71,10 +113,7 @@ app = FastAPI(
 )
 
 # ----------- State Management ----------- #
-
-# Current water consumption
 aiwaterdrops_consumed = load_aiwaterdrops()
-# Agents storage
 agents_registry = {}
 
 # ----------- Load Template ----------- #
@@ -87,73 +126,68 @@ except Exception as template_error:
     raise RuntimeError(f"Could not load manifest_template.json: {template_error}")
 
 # -------------- Helper functions -------------#
-
 def safe_json(obj, max_depth=6):
     """
-    Summary:
-        Produce a JSON-safe, acyclic structure from arbitrary Python objects.
+    Produces a JSON-safe, acyclic structure from arbitrary Python objects.
 
     Parameters:
-        obj (Any): Any Python object.
-        max_depth (int): Hard cap to avoid deep recursion.
+        obj (Any): Any Python object
+        max_depth (int): Hard cap to avoid deep recursion
 
     Returns:
-        Any: A structure made only of dict/list/str/float/int/bool/None.
+        Any: A structure composed of dict/list/str/float/int/bool/None
 
-    Notes:
-        - dict keys are coerced to strings
-        - non-serializable leaves are converted to str(obj)
-        - truncates depth to prevent cycles / runaway nesting
+    Initial State:
+        - Object may include non-serializable leaves or cycles
+
+    Final State:
+        - JSON-safe structure with truncated depth
+
+    Raises:
+        None
+
+    Water Cost:
+        - 0 (internal)
     """
     if max_depth <= 0:
         return str(obj)
-
-    # Primitives pass through
     if obj is None or isinstance(obj, (bool, int, float, str)):
         return obj
-
-    # Lists/Tuples
     if isinstance(obj, (list, tuple)):
         return [safe_json(x, max_depth - 1) for x in obj]
-
-    # Dicts — coerce keys to str
     if isinstance(obj, dict):
         out = {}
         for k, v in obj.items():
             sk = k if isinstance(k, str) else str(k)
             out[sk] = safe_json(v, max_depth - 1)
         return out
-
-    # Try direct JSON serialization; if it fails, fallback to string
     try:
         json.dumps(obj)
         return obj
     except Exception:
         return str(obj)
 
-# ----------- Internal Utilities ----------- #
 def _load_agents() -> dict:
     """
-    Summary:
-        Load the registry of agents from disk if it exists.
+    Loads the registry of agents from disk if present.
 
     Parameters:
         None
 
     Returns:
-        dict: Parsed content of agents.json, or empty dict if file not found.
+        dict: Parsed content of agents.json, or {} if not found
 
     Initial State:
-        `agents.json` may or may not exist.
+        - agents.json may or may not exist
 
     Final State:
-        Returns loaded registry or initializes an empty one.
+        - Registry is returned and also assigned to in-memory state by caller
 
     Raises:
-        RuntimeError — if agents.json is malformed or cannot be read.
+        RuntimeError: If agents.json is malformed/unreadable
 
     Water Cost:
-        0 (internal function)
+        - 0 (internal)
     """
     if AGENTS_FILE.exists():
         try:
@@ -165,26 +199,25 @@ def _load_agents() -> dict:
 
 def _save_agents(registry: dict) -> None:
     """
-    Summary:
-        Save the current agent registry to disk.
+    Persists the current agent registry to disk.
 
     Parameters:
-        registry (dict): The agent registry to persist.
+        registry (dict): The agent registry to persist
 
     Returns:
         None
 
     Initial State:
-        In-memory `registry` is populated.
+        - registry is an in-memory dict
 
     Final State:
-        `agents.json` is written or overwritten.
+        - agents.json is written/overwritten
 
     Raises:
-        RuntimeError — if writing to disk fails.
+        RuntimeError: If writing fails
 
     Water Cost:
-        0 (internal function)
+        - 0 (internal)
     """
     try:
         with AGENTS_FILE.open("w", encoding="utf-8") as f:
@@ -194,26 +227,25 @@ def _save_agents(registry: dict) -> None:
 
 def _load_agent_manifest(agent_name: str) -> dict:
     """
-    Summary:
-        Load manifest.json of a specific agent by name.
+    Loads an agent's manifest.json from agents/<agent_name>/.
 
     Parameters:
-        agent_name (str): Name of the agent.
+        agent_name (str): Agent folder name
 
     Returns:
-        dict: Parsed content of the agent's manifest.json.
+        dict: Parsed manifest content
 
     Initial State:
-        Agent's manifest file must exist under agents/<agent_name>/.
+        - agents/<agent_name>/manifest.json exists
 
     Final State:
-        Manifest is loaded and returned.
+        - Manifest dict is returned
 
     Raises:
-        FileNotFoundError — if manifest does not exist.
+        FileNotFoundError: If manifest is missing
 
     Water Cost:
-        0 (internal function)
+        - 0 (internal)
     """
     manifest_path = AGENT_DIR / agent_name / "manifest.json"
     if not manifest_path.exists():
@@ -223,27 +255,26 @@ def _load_agent_manifest(agent_name: str) -> dict:
 
 def _are_specs_compatible(output_spec: dict, input_spec: dict) -> bool:
     """
-    Summary:
-        Check if the output type of one agent matches the input type of another.
+    Checks if the output type of one agent matches the input type of another.
 
     Parameters:
-        output_spec (dict): Output specification from an agent manifest.
-        input_spec (dict): Input specification from another agent manifest.
+        output_spec (dict): Producer spec
+        input_spec (dict): Consumer spec
 
     Returns:
-        bool: True if specs match on type, else False.
+        bool: True if both have same top-level 'type'
 
     Initial State:
-        Both specs must be valid dictionaries.
+        - Specs are dicts with a top-level 'type' (optional in manifests)
 
     Final State:
-        Compatibility is evaluated.
+        - Boolean compatibility verdict
 
     Raises:
         None
 
     Water Cost:
-        0 (internal function)
+        - 0 (internal)
     """
     return output_spec.get("type") == input_spec.get("type")
 
@@ -259,26 +290,16 @@ class AgentRegistration(BaseModel):
 @app.get("/health")
 def health():
     """
-    Summary:
-        Check orchestrator status and return list of registered agents.
+    Returns orchestrator status and the list of registered agents.
 
     Parameters:
         None
 
     Returns:
-        dict: Dictionary with orchestrator status and agent names.
-
-    Initial State:
-        Orchestrator must be running and registry loaded.
-
-    Final State:
-        Returns basic health information and current agent list.
-
-    Raises:
-        None
+        dict: {status, registered_agents}
 
     Water Cost:
-        0
+        - 0
     """
     return {
         "status": "ClearCoreAI Orchestrator is running.",
@@ -288,38 +309,37 @@ def health():
 @app.post("/register_agent")
 def register_agent(agent: AgentRegistration):
     """
-    Summary:
-        Register a new agent by validating its manifest and storing it persistently.
+    Registers a new agent by validating its manifest and storing it persistently.
 
     Parameters:
-        agent (AgentRegistration): Object containing agent name and base URL.
+        agent (AgentRegistration): {name, base_url}
 
     Returns:
-        dict: Confirmation message upon success.
+        dict: Confirmation message
 
     Initial State:
-        Agent must expose a valid `/manifest` endpoint.
+        - Agent exposes GET /manifest with a valid JSON manifest
+        - manifest_template.json is loaded
 
     Final State:
-        Agent manifest is stored and visible in registry.
+        - Registry stores agent base_url + manifest + normalized capabilities
 
     Raises:
-        HTTPException — if unreachable, malformed, or manifest is invalid.
+        HTTPException: If agent is unreachable, manifest invalid, or persistence fails
 
     Water Cost:
-        0.2 waterdrops
+        - 0.2 waterdrops
     """
     try:
-        # ➤ Use /manifest instead of /capabilities to get the full manifest
-        manifest_response = requests.get(f"{agent.base_url}/manifest", timeout=5)
-        manifest_response.raise_for_status()
-        manifest = manifest_response.json()
+        resp = requests.get(f"{agent.base_url}/manifest", timeout=5)
+        resp.raise_for_status()
+        manifest = resp.json()
     except requests.exceptions.RequestException as req_error:
         raise HTTPException(status_code=400, detail=f"Cannot reach agent at {agent.base_url}: {req_error}")
     except Exception as json_error:
         raise HTTPException(status_code=400, detail=f"Invalid JSON from /manifest: {json_error}")
 
-    # ➤ Normalize capabilities: accept ["cap"], [{"name": "cap"}], or { "cap": "desc" }
+    # Normalize capabilities: accept ["cap"], [{"name": "cap"}], or { "cap": "desc" }
     raw_caps = manifest.get("capabilities", [])
     normalized_caps = []
     if isinstance(raw_caps, list):
@@ -346,10 +366,9 @@ def register_agent(agent: AgentRegistration):
     except ValidationError as validation_error:
         raise HTTPException(status_code=400, detail=f"Manifest invalid: {validation_error.message}")
 
-    # ➤ Transform capabilities list into a structured dictionary
+    # Build structured capabilities for quick lookup
     capabilities_dict = {}
     for cap in manifest.get("capabilities", []):
-        # cap is guaranteed to be a dict after normalization above
         name = cap.get("name")
         if name:
             capabilities_dict[name] = {
@@ -357,7 +376,6 @@ def register_agent(agent: AgentRegistration):
                 "custom_input_handler": cap.get("custom_input_handler")
             }
 
-    # ➤ Store full manifest but also structured capabilities for internal routing
     agents_registry[agent.name] = {
         "base_url": agent.base_url,
         "manifest": manifest,
@@ -368,31 +386,20 @@ def register_agent(agent: AgentRegistration):
         _save_agents(agents_registry)
     except RuntimeError as save_error:
         raise HTTPException(status_code=500, detail=str(save_error))
+
     increment_aiwaterdrops(0.2)
     return {"message": f"Agent '{agent.name}' registered successfully."}
+
 @app.get("/agents")
 def list_agents():
     """
-    Summary:
-        List all registered agents along with their declared capabilities.
-
-    Parameters:
-        None
+    Lists all registered agents with their capabilities.
 
     Returns:
-        dict: Mapping of agent names to base_url and capabilities.
-
-    Initial State:
-        Registry must be loaded.
-
-    Final State:
-        Returns a filtered view of registered agents.
-
-    Raises:
-        None
+        dict: { "agents": { name: {base_url, capabilities} } }
 
     Water Cost:
-        0.05 waterdrops
+        - 0.05 waterdrops
     """
     increment_aiwaterdrops(0.05)
     return {
@@ -408,26 +415,19 @@ def list_agents():
 @app.get("/agent_manifest/{agent_name}")
 def get_agent_manifest(agent_name: str):
     """
-    Summary:
-        Retrieve full manifest for a given agent.
+    Returns the full manifest for a given agent.
 
     Parameters:
-        agent_name (str): The name of the agent to query.
+        agent_name (str): Registered agent name
 
     Returns:
-        dict: Parsed manifest of the agent.
-
-    Initial State:
-        Agent must be registered.
-
-    Final State:
-        Manifest is returned unchanged.
+        dict: The manifest JSON
 
     Raises:
-        HTTPException — if agent not found.
+        HTTPException: 404 if agent not found
 
     Water Cost:
-        0
+        - 0
     """
     if agent_name not in agents_registry:
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_name}")
@@ -436,26 +436,25 @@ def get_agent_manifest(agent_name: str):
 @app.get("/agents/connections")
 def detect_agent_connections():
     """
-    Summary:
-        Detect compatible input/output connections between all registered agents.
+    Detects compatible input/output connections between registered agents.
 
     Parameters:
         None
 
     Returns:
-        dict: List of connection tuples with reasons.
+        dict: {"connections": [{"from": str, "to": str, "reason": str}, ...]}
 
     Initial State:
-        Registry must be populated with valid manifests.
+        - Manifests may provide input_spec/output_spec
 
     Final State:
-        Computed list of agent links is returned.
+        - Returns possible connections based on top-level type match
 
     Raises:
-        HTTPException — on manifest parsing or matching failure.
+        HTTPException: 500 if analysis crashes
 
     Water Cost:
-        0
+        - 0
     """
     connections = []
     try:
@@ -481,26 +480,13 @@ def detect_agent_connections():
 @app.get("/agents/metrics")
 def aggregate_agent_metrics():
     """
-    Summary:
-        Query all registered agents for their `/metrics` data.
-
-    Parameters:
-        None
+    Queries all agents for their /metrics snapshot.
 
     Returns:
-        dict: Aggregated metrics per agent or error info.
-
-    Initial State:
-        Agents must expose `/metrics`.
-
-    Final State:
-        Returns latest metrics or fallback error per agent.
-
-    Raises:
-        None, handled gracefully per agent.
+        dict: { agent_name: { ...metrics... } | {error}, ... }
 
     Water Cost:
-        0 (monitoring is free)
+        - 0 (monitoring)
     """
     results = {}
     for name, data in agents_registry.items():
@@ -516,26 +502,13 @@ def aggregate_agent_metrics():
 @app.get("/agents/raw")
 def get_all_agent_manifests():
     """
-    Summary:
-        Return raw manifest content for all registered agents.
-
-    Parameters:
-        None
+    Returns raw manifest content for all registered agents.
 
     Returns:
-        dict: Agent names mapped to their manifest.json content.
-
-    Initial State:
-        Registry must contain valid manifests.
-
-    Final State:
-        Manifests are returned verbatim.
-
-    Raises:
-        None
+        dict: { name: manifest.json, ... }
 
     Water Cost:
-        0
+        - 0
     """
     return {
         name: data["manifest"]
@@ -543,28 +516,42 @@ def get_all_agent_manifests():
     }
 
 # ----------- Planning & Execution ----------- #
-
 def _extract_step_lines(plan_text: str) -> list:
     """
-    Pull only well-formed step lines like "1. agent → capability" from an LLM plan.
-    Accepts both the Unicode arrow "→" and ASCII "->". Normalizes to "→".
+    Extracts only well-formed step lines like "1. agent → capability".
+    Accepts both "→" and "->"; always normalizes to "→".
+
+    Parameters:
+        plan_text (str): Raw plan text
+
+    Returns:
+        list[str]: Normalized step lines
+
+    Water Cost:
+        - 0 (internal)
     """
     lines = []
     for raw in (plan_text or "").splitlines():
         s = raw.strip()
-        # Accept "→" or "->"
         m = re.match(r"^\s*\d+\.\s*([A-Za-z0-9_]+)\s*(?:→|->)\s*([A-Za-z0-9_\-:]+)\s*$", s)
         if m:
             agent, cap = m.groups()
-            # Normalize to the Unicode arrow to keep a consistent internal format
             lines.append(f"{len(lines)+1}. {agent} → {cap}")
     return lines
 
-
 def _filter_registered_steps(step_lines: list, registry: dict) -> list:
     """
-    Keep only steps whose agent is registered and capability is advertised in its manifest.
-    Accepts both the Unicode arrow "→" and ASCII "->". Normalizes to "→".
+    Keeps only steps where agent exists and capability is advertised in that agent’s manifest.
+
+    Parameters:
+        step_lines (list[str]): Lines like "N. agent → cap"
+        registry (dict): Current agents registry
+
+    Returns:
+        list[str]: Filtered/renumbered step lines
+
+    Water Cost:
+        - 0 (internal)
     """
     filtered = []
     for s in step_lines:
@@ -579,16 +566,25 @@ def _filter_registered_steps(step_lines: list, registry: dict) -> list:
         caps = agent_entry.get("manifest", {}).get("capabilities", [])
         cap_names = {(c["name"] if isinstance(c, dict) and "name" in c else c) for c in caps if isinstance(c, (dict, str))}
         if cap in cap_names:
-            # Rebuild the line with normalized arrow to ensure consistent downstream parsing
-            filtered.append(re.sub(r"^\d+\.", f"{len(filtered)+1}.", f"{agent} → {cap}") if False else f"{len(filtered)+1}. {agent} → {cap}")
+            filtered.append(f"{len(filtered)+1}. {agent} → {cap}")
     return filtered
-
-
 
 def _sanitize_plan_output(raw_plan: str, registry: dict) -> str:
     """
-    Normalize and sanitize an LLM plan: strip prose, keep valid steps, and ensure at least one.
-    Accepts "→" and "->" and outputs normalized "→".
+    Normalizes and sanitizes an LLM plan: remove prose, keep valid steps, ensure ≥1 step.
+
+    Parameters:
+        raw_plan (str): Raw LLM output
+        registry (dict): Agents registry
+
+    Returns:
+        str: Clean plan string
+
+    Raises:
+        RuntimeError: If no executable steps remain
+
+    Water Cost:
+        - 0 (internal)
     """
     steps = _extract_step_lines(raw_plan)
     steps = _filter_registered_steps(steps, registry)
@@ -598,41 +594,39 @@ def _sanitize_plan_output(raw_plan: str, registry: dict) -> str:
 
 def generate_plan_from_goal(goal: str) -> str:
     """
-    Summary:
-        Generate an execution plan from a natural language goal using LLM inference.
+    Generates a numbered execution plan from a natural-language goal.
 
     Parameters:
-        goal (str): Natural language objective to transform into a structured plan.
+        goal (str): Objective to transform into a step plan
 
     Returns:
-        str: Multistep plan in numbered text format, one step per line.
+        str: Multiline plan "1. agent → capability\n2. ..."
 
     Initial State:
-        LICENSE_FILE must exist and contain a valid API key.
-        Registry must contain at least one agent with declared capabilities.
+        - license_keys.json contains a valid Mistral key
+        - Registry has ≥1 agent with capabilities
 
     Final State:
-        A valid execution plan string is returned.
+        - A sanitized plan string is returned; LLM water is accounted
 
     Raises:
-        RuntimeError — if plan generation fails or returns invalid format.
+        HTTPException(422): If LLM declares the goal unsupported
+        RuntimeError: If plan generation or sanitization fails
 
     Water Cost:
-        3 waterdrops (LLM inference and registry scan)
+        - ~3 waterdrops (delegates to LLM + scan)
     """
     try:
         plan, water_cost = generate_plan_with_mistral(goal, agents_registry, license_keys)
         increment_aiwaterdrops(water_cost)
 
-        # NEW: let the LLM explicitly refuse unsupported goals
+        # Optional: allow explicit unsupported marker from LLM ("UNSUPPORTED | reason")
         upper = plan.strip().upper()
         if upper.startswith("UNSUPPORTED"):
-            # Extract a human reason after the '|', if present
             reason = plan.split("|", 1)[1].strip() if "|" in plan else "Goal unsupported by current agents."
-            # Surface as 422 so clients can handle gracefully
             raise HTTPException(status_code=422, detail=f"Unsupported goal: {reason}")
 
-        # Coerce plan to string
+        # Coerce to string and sanitize
         if isinstance(plan, list):
             plan = "\n".join(map(str, plan))
         elif not isinstance(plan, str):
@@ -641,71 +635,64 @@ def generate_plan_from_goal(goal: str) -> str:
         clean_plan = _sanitize_plan_output(plan, agents_registry)
         return clean_plan
     except HTTPException:
-        # let 422 pass through unchanged
         raise
     except Exception as plan_error:
         raise RuntimeError(f"Plan generation failed: {plan_error}")
 
-
 @app.post("/plan")
 def plan_goal(payload: dict):
     """
-    Summary:
-        Generate a ClearCoreAI execution plan from a given goal string.
+    Generates a plan from a goal and (for convenience) immediately executes it.
 
     Parameters:
-        request (GoalRequest): Must contain a 'goal' key with a natural language objective.
+        payload (dict): {"goal": str}
 
     Returns:
-        dict: The original goal and its corresponding structured plan.
-
-    Initial State:
-        Same as `generate_plan_from_goal`.
-
-    Final State:
-        Returns the computed plan string.
+        dict: {"goal": str, "plan": str, "result": <execution result>}
 
     Raises:
-        HTTPException — if goal is missing or plan generation fails.
+        HTTPException: 400 if goal missing, 422 if unsupported, 500 on failure
 
     Water Cost:
-        3 waterdrops (delegates to LLM plan generation)
+        - ~3 waterdrops (planning) + execution costs
     """
     goal = payload.get("goal")
     if not goal:
         raise HTTPException(status_code=400, detail="Missing 'goal' field.")
     try:
-        plan = generate_plan_from_goal(goal)  # may raise HTTPException 422
+        plan = generate_plan_from_goal(goal)
         result = execute_plan_string(plan)
         return {"goal": goal, "plan": plan, "result": result}
     except HTTPException as http_err:
-        # Do NOT wrap; propagate (e.g., 422 Unsupported)
         raise http_err
     except Exception as run_error:
         raise HTTPException(status_code=500, detail=str(run_error))
 
 def execute_plan_string(plan: str) -> dict:
     """
-    Summary:
-        Execute a structured plan step-by-step and return a full execution trace.
+    Executes the plan step-by-step and returns a full execution trace.
 
     Parameters:
-        plan (str): Multiline execution plan, formatted as "1. agent → capability".
+        plan (str): "N. agent → capability" per line
 
     Returns:
-        dict: Contains the full plan, per-step execution trace, and final output context.
+        dict: {
+            "trace": [ {step, agent, capability, input_used, output, error}... ],
+            "final_output": <last business output or last output>,
+            "total_waterdrops_used": <float from final_output.waterdrops_used or 0.0>
+        }
 
     Initial State:
-        Agents in the plan must be registered and reachable via /execute.
+        - All agents in the plan are registered and reachable via /execute
 
     Final State:
-        Executes each step in sequence, updating shared context progressively.
+        - Each step is invoked; context is passed along; trace is accumulated
 
     Raises:
-        None directly — execution errors are embedded per step in the result.
+        None (errors captured per-step in the trace)
 
     Water Cost:
-        ~0.02 waterdrops fixed + full cost of each /execute call per step (depends on agents)
+        - 0.02 (fixed) + per-agent execution costs downstream
     """
     def _capabilities_for(agent_name: str) -> set:
         caps = agents_registry.get(agent_name, {}).get("manifest", {}).get("capabilities", [])
@@ -718,21 +705,19 @@ def execute_plan_string(plan: str) -> dict:
         return names
 
     def _clean_input(ctx):
-        # Drop meta keys that downstream agents don’t care about
         if isinstance(ctx, dict):
             return {k: v for k, v in ctx.items() if k not in ("waterdrops_used",)}
         return ctx
 
     results = []
-    context = None                # last output of any step
-    business_context = None       # last output of a NON-meta step
+    context = None
+    business_context = None
 
     for raw in plan.splitlines():
         step_line = raw.strip()
         if not step_line or step_line.startswith("#"):
             continue
 
-        # Normalize ASCII arrow to Unicode for consistent handling
         step_line = step_line.replace("->", "→")
         m = re.match(r"^\d+\.\s*([A-Za-z0-9_]+)\s*→\s*([A-Za-z0-9_]+)$", step_line)
         if not m:
@@ -745,7 +730,6 @@ def execute_plan_string(plan: str) -> dict:
             results.append({"step": step_line, "error": f"Agent '{agent_name}' not registered"})
             continue
 
-        # Skip steps whose capability isn’t declared in the agent manifest
         available = _capabilities_for(agent_name)
         if capability not in available:
             results.append({
@@ -766,7 +750,6 @@ def execute_plan_string(plan: str) -> dict:
             custom_handler = cap_obj.get("custom_input_handler") if isinstance(cap_obj, dict) else None
 
             if custom_handler == "use_execution_trace":
-                # The agent consumes the full execution trace
                 payload_input = {
                     "steps": [
                         {
@@ -780,14 +763,12 @@ def execute_plan_string(plan: str) -> dict:
                     ]
                 }
 
-            # Ensure the input we pass (and record) carries the agent base_url for auditing
             if not isinstance(payload_input, dict) and payload_input is not None:
-                # if previous context wasn’t a dict, wrap it so we can attach the URL hint
                 payload_input = {"_value": payload_input}
-
             if payload_input is None:
                 payload_input = {}
 
+            # Attach base_url hint for downstream audit agents
             payload_input["_agent_base_url"] = agent["base_url"]
 
             url = f"{agent['base_url']}/execute"
@@ -796,7 +777,6 @@ def execute_plan_string(plan: str) -> dict:
             resp.raise_for_status()
             out = resp.json()
 
-            # Mirror the agent base_url into the output as well (helps the auditor either way)
             if isinstance(out, dict):
                 out.setdefault("_agent_base_url", agent["base_url"])
 
@@ -809,9 +789,7 @@ def execute_plan_string(plan: str) -> dict:
                 "error": None
             })
 
-            # Always update the raw last context
             context = out
-            # Only update business_context for NON-meta steps
             if custom_handler != "use_execution_trace":
                 business_context = out
 
@@ -828,7 +806,6 @@ def execute_plan_string(plan: str) -> dict:
 
     increment_aiwaterdrops(0.02)
 
-    # Pick the last non-meta output if available, otherwise fall back to the raw last output
     final_context = business_context if business_context is not None else context
 
     return {
@@ -840,26 +817,19 @@ def execute_plan_string(plan: str) -> dict:
 @app.post("/execute_plan")
 def execute_plan(request: dict):
     """
-    Summary:
-        Execute a given textual plan and return the results.
+    Executes a given plan string and returns the execution result.
 
     Parameters:
-        request (dict): Must contain a 'plan' field with a valid plan string.
+        request (dict): {"plan": str}
 
     Returns:
-        dict: Execution result as returned by `execute_plan_string`.
-
-    Initial State:
-        Same requirements as `execute_plan_string`.
-
-    Final State:
-        Plan is fully executed or halted on first major error.
+        dict: Execution result from execute_plan_string
 
     Raises:
-        HTTPException — if the 'plan' field is missing.
+        HTTPException: 400 if 'plan' missing
 
     Water Cost:
-        Pass-through — see `execute_plan_string`
+        - Pass-through (see execute_plan_string)
     """
     plan = request.get("plan")
     if not plan:
@@ -869,26 +839,19 @@ def execute_plan(request: dict):
 @app.post("/run_goal")
 def run_goal(payload: dict):
     """
-    Summary:
-        End-to-end handler: transforms a natural language goal into a plan and executes it.
+    End-to-end handler: plan + execute from a goal.
 
     Parameters:
-        payload (dict): Must contain a 'goal' string field.
+        payload (dict): {"goal": str}
 
     Returns:
-        dict: Full result including goal, generated plan, and execution trace.
-
-    Initial State:
-        Same as for plan and execution.
-
-    Final State:
-        One-click processing of goal into final output.
+        dict: {"goal": str, "plan": str, "result": <trace>}
 
     Raises:
-        HTTPException — if goal is missing or any part of the process fails.
+        HTTPException: 400 missing goal, 500 other failures
 
     Water Cost:
-        3 waterdrops (plan) + all waterdrops from plan execution (variable)
+        - ~3 (planning) + execution variable
     """
     goal = payload.get("goal")
     if not goal:
@@ -907,33 +870,28 @@ def run_goal(payload: dict):
 @app.get("/water/total")
 def get_total_water_usage():
     """
-    Summary:
-        Returns the total waterdrop consumption including orchestrator and all agents.
+    Returns the total waterdrop consumption including orchestrator + all agents.
 
     Parameters:
         None
 
     Returns:
-        dict: Breakdown of water usage per component and total sum.
+        dict: {"breakdown": {component: usage|error}, "total_waterdrops": float}
 
     Initial State:
-        Orchestrator and agents have stored water usage data.
+        - Agents expose /metrics with aiwaterdrops_consumed
 
     Final State:
-        Aggregated metrics are computed and returned.
+        - Totals aggregated and rounded
 
     Raises:
-        None
+        None (per-agent errors are embedded)
 
     Water Cost:
-        0
+        - 0
     """
-    from tools.water import get_aiwaterdrops
-
     total = get_aiwaterdrops()
-    breakdown = {
-        "orchestrator": total
-    }
+    breakdown = {"orchestrator": total}
 
     for name, data in agents_registry.items():
         base_url = data.get("base_url")
@@ -947,7 +905,4 @@ def get_total_water_usage():
         except Exception as e:
             breakdown[name] = f"error: {str(e)}"
 
-    return {
-        "breakdown": breakdown,
-        "total_waterdrops": round(total, 3)
-    }
+    return {"breakdown": breakdown, "total_waterdrops": round(total, 3)}

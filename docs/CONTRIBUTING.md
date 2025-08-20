@@ -152,27 +152,7 @@ docs: add architecture diagram in README
     - Document your agent with a README.md.
     - Apply the **mandatory code commenting style** described above to ALL public functions/classes.
 
----
 
-## 🏃 How to test locally
-
-docker compose up --build
-
-Test orchestrator:
-
-http://localhost:8000/health 
-
-http://localhost:8000/agents
-
-Test example agent:
-
-http://localhost:8500/health
-
-http://localhost:8500/get_articles
-
-http://localhost:8500/metrics
-
----
 
 ## 🗺 Future ideas and discussions
 

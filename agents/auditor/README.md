@@ -1,39 +1,181 @@
-# ClearCoreAI Auditor Agent
+# ClearCoreAI Agent: auditor
 
-The ClearCoreAI Auditor Agent is a specialized AI agent designed to perform comprehensive audits on software projects. It utilizes advanced AI techniques to analyze codebases, identify potential issues, and provide actionable insights to improve code quality and maintainability.
+**Version:** 0.2.0  
+**Last Updated:** 2025-08-20  
+**Validated by:** Olivier Hays  
 
-## Features
+---
 
-- Audits execution traces and outputs from other AI agents
-- Verifies output consistency and correctness across agent runs
-- Checks for pipeline consistency and detects anomalies in workflows
-- Generates audit reports using heuristic rules and/or large language models (LLMs)
-- Provides actionable feedback on agent output quality and reliability
+## Overview
 
-## Installation
+`auditor` is a ClearCoreAI-compatible agent that performs audits on execution traces and agent outputs.  
+Its purpose is to **verify consistency, correctness, and quality** of pipelines orchestrated by ClearCoreAI.
 
-To install the ClearCoreAI Auditor Agent, clone the repository and install the required dependencies:
+It features:
 
-```bash
-git clone https://github.com/clearcoreai/auditor-agent.git
-cd auditor-agent
-pip install -r requirements.txt
+- audit of execution traces and outputs  
+- anomaly and inconsistency detection  
+- quality scoring of agent workflows  
+- final audit report generation  
+- orchestrator-compatible execution via `/execute`  
+- automatic self-registration to the orchestrator at startup  
+
+---
+
+## Endpoints
+
+### `GET /health`
+
+Basic health check to verify that the agent is running.  
+Water cost: 0
+
+---
+
+### `GET /capabilities`
+
+Returns declared capabilities, as defined in `manifest.json`.  
+Water cost: 0
+
+---
+
+### `GET /manifest`
+
+Returns the full manifest.  
+Useful for orchestrator registration and auditing.  
+Water cost: 0
+
+---
+
+### `GET /metrics`
+
+Returns runtime metrics **specific to this agent**:
+
+- agent name and version  
+- uptime in seconds  
+- total waterdrops consumed  
+
+Water cost: 0
+
+---
+
+### `POST /execute`
+
+Main endpoint for orchestrator-controlled execution.  
+Dispatches requests based on the requested `capability`.
+
+Example payload:
+
+```json
+{
+  "capability": "audit_trace",
+  "input": {
+    "steps": [
+      {
+        "agent": "fetch_articles",
+        "capability": "fetch_static_articles",
+        "input": {},
+        "output": {"articles": [...]}
+      },
+      {
+        "agent": "summarize_articles",
+        "capability": "structured_output_generation",
+        "input": {"articles": [...]},
+        "output": {"summary": "..."}
+      }
+    ]
+  }
+}
 ```
+
+Water cost: 0.05 waterdrops + 0.01 per step analyzed  
+
+---
+
+## Capabilities
+
+### `audit_trace`
+
+Analyzes a full execution trace (steps, inputs, outputs, errors).  
+
+Produces a structured audit report such as:
+
+```json
+{
+  "report": {
+    "steps_analyzed": 5,
+    "issues_found": 1,
+    "quality_score": 0.82,
+    "comments": ["Step 3 output inconsistent with declared schema."]
+  }
+}
+```
+
+---
+
+### `verify_output_consistency`
+
+Checks multiple runs of the same pipeline to detect inconsistencies.  
+
+Returns:
+
+```json
+{
+  "consistency": {
+    "runs_compared": 3,
+    "inconsistencies": 0,
+    "verdict": "stable"
+  }
+}
+```
+
+---
+
+### `generate_audit_report`
+
+Aggregates findings from previous capabilities into a human-readable report.  
+
+---
 
 ## Usage
 
-Run the auditor agent on your project directory:
+### Docker Compose
 
 ```bash
-python auditor_agent.py --project-path /path/to/your/project
+docker compose up --build
 ```
 
-Additional command-line options are available; use `--help` to see all options.
+### Manual Run
 
-## Contributing
+```bash
+docker build -t auditor_agent .
+docker run -p 8600:8600 auditor_agent
+```
 
-Contributions are welcome! Please open issues or submit pull requests for improvements and new features.
+---
+
+## Required Files
+
+Before launching the agent, ensure the following files exist:
+
+- `manifest.json`: capability declarations and metadata  
+- `memory/short_term/aiwaterdrops.json`: created if missing  
+
+To initialize memory:
+
+```bash
+mkdir -p memory/short_term
+echo '{"aiwaterdrops_consumed": 0}' > memory/short_term/aiwaterdrops.json
+```
+
+---
+
+## Self-Registration
+
+The agent attempts to register itself to the orchestrator at startup via `/manifest`.  
+If the orchestrator is not available, it logs the error but continues running.
+
+---
 
 ## License
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+This project is licensed under the MIT License.

@@ -1,0 +1,152 @@
+{
+  "meta": {
+    "agent": "${AGENT_NAME}",
+    "version": "0.1.0-template",
+    "owner": "${OWNER_OR_TEAM}",
+    "description": "Generic audit policy template for ClearCoreAI agents. Fill placeholders and keep only rules relevant to the agent's I/O shape."
+  },
+
+  "scoring": {
+    "base": 1.0,
+    "deductions": {
+      "warning": 0.2,
+      "fail": 1.0
+    },
+    "aggregation": "min"
+  },
+
+  "rules": [
+    {
+      "id": "IN-STRUCTURE-01",
+      "target": "input",
+      "assert": {
+        "any_of_present": [
+          "input.articles",
+          "input.collection.items",
+          "input.payload.items"
+        ]
+      },
+      "severity": "fail",
+      "message": "Input must provide one of: 'articles', 'collection.items', or 'payload.items'."
+    },
+    {
+      "id": "IN-ARTICLES-NONEMPTY-02",
+      "target": "input.articles",
+      "assert": { "optional": true, "type": "array", "min_items": 1 },
+      "severity": "fail",
+      "message": "When 'articles' is provided, it must be a non-empty array."
+    },
+    {
+      "id": "IN-COLLECTION-NONEMPTY-03",
+      "target": "input.collection.items",
+      "assert": { "optional": true, "type": "array", "min_items": 1 },
+      "severity": "fail",
+      "message": "When 'collection.items' is provided, it must be a non-empty array."
+    },
+    {
+      "id": "IN-PAYLOAD-NONEMPTY-04",
+      "target": "input.payload.items",
+      "assert": { "optional": true, "type": "array", "min_items": 1 },
+      "severity": "fail",
+      "message": "When 'payload.items' is provided, it must be a non-empty array."
+    },
+    {
+      "id": "IN-CONTENT-PRESENT-05",
+      "target": "input.articles[].content | input.collection.items[].content | input.payload.items[].content",
+      "assert": { "type": "string", "min_length": 20 },
+      "severity": "warning",
+      "message": "Each input item should include 'content' (≥ 20 chars)."
+    },
+    {
+      "id": "IN-TITLE-OPTIONAL-06",
+      "target": "input.articles[].title | input.collection.items[].title | input.payload.items[].title",
+      "assert": { "optional": true, "type": "string", "min_length": 1 },
+      "severity": "warning",
+      "message": "Titles, when provided, should be non-empty strings."
+    },
+
+    {
+      "id": "OUT-STRUCTURE-10",
+      "target": "output",
+      "assert": {
+        "any_of_present": [
+          "output.summaries",
+          "output.collection.items",
+          "output.items"
+        ]
+      },
+      "severity": "fail",
+      "message": "Output must include at least one of: 'summaries', 'collection.items', or 'items'."
+    },
+    {
+      "id": "OUT-SUMMARIES-STRUCTURE-11",
+      "target": "output.summaries",
+      "assert": { "optional": true, "type": "array", "min_items": 1 },
+      "severity": "fail",
+      "message": "When 'summaries' is present, it must be a non-empty array."
+    },
+    {
+      "id": "OUT-ITEMS-STRUCTURE-12",
+      "target": "output.items",
+      "assert": { "optional": true, "type": "array", "min_items": 1 },
+      "severity": "fail",
+      "message": "When 'items' is present, it must be a non-empty array."
+    },
+    {
+      "id": "OUT-COLLECTION-STRUCTURE-13",
+      "target": "output.collection.items",
+      "assert": { "optional": true, "type": "array", "min_items": 1 },
+      "severity": "fail",
+      "message": "When 'collection.items' is present, it must be a non-empty array."
+    },
+
+    {
+      "id": "OUT-SUMMARY-LENGTH-14",
+      "target": "output.summaries[]",
+      "assert": { "type": "string", "min_length": 30 },
+      "severity": "warning",
+      "message": "Each summary should be at least 30 characters."
+    },
+    {
+      "id": "OUT-OUTPUT-CONTENT-LENGTH-15",
+      "target": "output.collection.items[].content | output.items[].content",
+      "assert": { "type": "string", "min_length": 30 },
+      "severity": "warning",
+      "message": "Each output item content should be at least 30 characters."
+    },
+
+    {
+      "id": "OUT-COUNT-MATCH-16",
+      "target": "output.summaries | output.collection.items | output.items",
+      "assert": {
+        "equals_other_length": "input.articles | input.collection.items | input.payload.items"
+      },
+      "severity": "fail",
+      "message": "The number of outputs must match the number of inputs."
+    },
+
+    {
+      "id": "OUT-NO-PLACEHOLDERS-17",
+      "target": "output.summaries[] | output.collection.items[].content | output.items[].content",
+      "assert": { "none_match_regex": ["^ok$", "^n/a$", "^\\s*$"] },
+      "severity": "warning",
+      "message": "Outputs should not be placeholders like 'ok', 'n/a', or empty."
+    },
+
+    {
+      "id": "OUT-WATERDROPS-OPTIONAL-18",
+      "target": "output.waterdrops_used",
+      "assert": { "optional": true, "type": "number", "min": 0 },
+      "severity": "warning",
+      "message": "'waterdrops_used' should be a non-negative number when present."
+    },
+
+    {
+      "id": "CONSISTENCY-REFS-20",
+      "target": "output.summaries[] | output.collection.items[].content | output.items[].content",
+      "assert": { "should_reference_input": true, "strategy": "llm" },
+      "severity": "warning",
+      "message": "Outputs should reflect key ideas from the inputs (checked by LLM heuristic)."
+    }
+  ]
+}

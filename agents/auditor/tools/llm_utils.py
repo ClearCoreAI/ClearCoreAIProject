@@ -29,7 +29,52 @@ Date: 2025-08-11
 
 Estimated Water Cost:
 - 6 waterdrops per call + 0.5 per step (heuristic)
+
+----------------------------------------------------------------------
+Usage Example (Python):
+
+from llm_utils import audit_trace_with_mistral
+
+# Minimal sample trace
+execution_trace = {
+    "steps": [
+        {
+            "agent": "summarize_articles",
+            "input": {"articles": [{"title": "AI in healthcare", "content": "Artificial intelligence is transforming diagnostics..."}]},
+            "output": {"summaries": ["AI is transforming diagnostics with precision medicine."]},
+            "error": None
+        }
+    ],
+    "policies": {
+        "summarize_articles": {
+            "rules": [
+                {
+                    "id": "OUT-SUMMARIES-STRUCTURE-10",
+                    "target": "output.summaries",
+                    "assert": {"required": True, "type": "array", "min_items": 1},
+                    "severity": "fail",
+                    "message": "Output must include a non-empty 'summaries' array."
+                }
+            ]
+        }
+    }
+}
+
+api_key = "<YOUR_MISTRAL_API_KEY>"
+audit, cost = audit_trace_with_mistral(execution_trace, api_key)
+
+print(audit)
+# → {
+#     "status": "ok",
+#     "summary": "...",
+#     "details": [
+#       {"agent": "summarize_articles", "status": "valid", "comment": "...", "score": 1.0}
+#     ]
+#   }
+print("Waterdrops used:", cost)
+----------------------------------------------------------------------
 """
+
 
 from __future__ import annotations
 import json
@@ -46,32 +91,44 @@ def audit_trace_with_mistral(
     temperature: float = 0.2,
 ) -> Tuple[Dict[str, Any], float]:
     """
-    Ask Mistral to audit an execution trace and return a schema-conformant report.
+    Executes a policy-driven LLM audit over a multi-agent execution trace.
 
     Parameters:
         execution_trace (dict): {
-          "steps": [{"agent": str, "input": any, "output": any, "error": str|None}, ...],
-          "policies": { "<agent>": { ... policy json ... }, ... }
+            "steps": [{"agent": str, "input": Any, "output": Any, "error": str|None}, ...],
+            "policies": { "<agent>": { ... policy json with 'rules': [...] ... }, ... }
         }
-        api_key (str): Mistral API key (Bearer)
-        model (str): Mistral model name
-        temperature (float): Sampling temperature
+        api_key (str): Bearer token for the Mistral API.
+        model (str): Mistral model identifier to use for chat.completions.
+        temperature (float): Sampling temperature for the generation.
 
     Returns:
-        (audit: dict, waterdrops_used: float)
-        where `audit` strictly matches:
-        {
-          "status": "ok" | "partial" | "fail",
-          "summary": "string",
-          "details": [
-            {"agent":"...","status":"valid|warning|fail","comment":"...","score":0.0..1.0},
-            ...
-          ]
-        }
+        Tuple[dict, float]: (audit, waterdrops_used) where `audit` strictly matches:
+            {
+              "status": "ok" | "partial" | "fail",
+              "summary": "string",
+              "details": [
+                {"agent":"...","status":"valid|warning|fail","comment":"...","score":0.0..1.0},
+                ...
+              ]
+            }
+            and waterdrops_used is a deterministic cost estimate.
+
+    Initial State:
+        - execution_trace is a dict with non-empty "steps" list.
+        - execution_trace["policies"] is a non-empty dict mapping agent names to policy dicts.
+        - api_key is a valid Mistral API key.
+
+    Final State:
+        - A compacted trace is sent to the LLM alongside the full per-agent policies.
+        - The LLM returns a JSON report; we parse and minimally coerce it into the required schema.
 
     Raises:
-        ValueError: if input is malformed (trace or policies)
-        Exception: on API / parsing errors
+        ValueError: If the execution trace is malformed or policies are missing/invalid.
+        Exception: For network/API errors or JSON parsing issues in the LLM response.
+
+    Water Cost:
+        - 6.0 + 0.5 * (number of steps) waterdrops per call (heuristic estimate).
     """
     _validate_trace(execution_trace)
     _validate_policies_mandatory(execution_trace)
@@ -98,8 +155,27 @@ def _build_messages(
     policies_by_agent: Dict[str, Any],
 ) -> List[Dict[str, str]]:
     """
-    Build strict messages for the chat.completions endpoint.
-    The assistant MUST return JSON only, matching the schema, and MUST apply the provided policies.
+    Builds strict chat messages that instruct the LLM to apply the provided policies.
+
+    Parameters:
+        compact_trace (dict): Size-limited representation of the trace for prompt economy.
+        policies_by_agent (dict): Full per-agent policies to be strictly applied by the LLM.
+
+    Returns:
+        List[dict]: List of {role, content} messages for the chat.completions API.
+
+    Initial State:
+        - compact_trace contains only sanitized previews of inputs/outputs.
+        - policies_by_agent is a non-empty dict already validated upstream.
+
+    Final State:
+        - Messages include: a system role with schema+rules and a user role with policies+trace.
+
+    Raises:
+        None (policy serialization fallback is handled defensively).
+
+    Water Cost:
+        - 0 waterdrops (prompt construction only).
     """
     system = (
         "You are a rigorous pipeline auditor for ClearCoreAI.\n"
@@ -154,7 +230,32 @@ def _call_mistral_chat(
     model: str,
     temperature: float,
 ) -> Dict[str, Any]:
-    """Low-level call to Mistral chat.completions."""
+    """
+    Executes a single chat.completions request against the Mistral API.
+
+    Parameters:
+        messages (List[dict]): Chat messages payload (system + user).
+        api_key (str): Bearer token for Mistral.
+        model (str): Model identifier (e.g., 'mistral-small').
+        temperature (float): Sampling temperature.
+
+    Returns:
+        dict: Minimal response dict containing {"raw": <full_api_json>, "content": <assistant_text>}.
+
+    Initial State:
+        - Network access to Mistral API is available.
+        - api_key is non-empty and valid.
+
+    Final State:
+        - Returns the assistant content for downstream JSON parsing.
+
+    Raises:
+        ValueError: If API key is missing.
+        Exception: On HTTP errors or unexpected response structure.
+
+    Water Cost:
+        - Counted in the caller’s estimate; no extra here.
+    """
     if not api_key or not isinstance(api_key, str):
         raise ValueError("Missing Mistral API key.")
 
@@ -183,7 +284,27 @@ def _call_mistral_chat(
 
 # -------------------------- Parsing & Coercion -------------------------- #
 def _parse_and_coerce_audit_json(result: Dict[str, Any]) -> Dict[str, Any]:
-    """Parse assistant content as JSON; coerce to the auditor schema with guardrails."""
+    """
+    Parses the assistant’s response and coerces it to the auditor schema with guardrails.
+
+    Parameters:
+        result (dict): Output from _call_mistral_chat containing 'content' with JSON text.
+
+    Returns:
+        dict: Coerced audit object with keys: status, summary, details[ {agent,status,comment,score} ].
+
+    Initial State:
+        - result['content'] is expected to be a JSON string or contain a JSON substring.
+
+    Final State:
+        - Returns a safe, schema-conformant audit dict (defaulting missing values where necessary).
+
+    Raises:
+        Exception: If the JSON cannot be parsed or coerced safely.
+
+    Water Cost:
+        - 0 waterdrops (parsing only).
+    """
     content = result.get("content", "")
     try:
         parsed = json.loads(content)
@@ -251,6 +372,27 @@ def _parse_and_coerce_audit_json(result: Dict[str, Any]) -> Dict[str, Any]:
 
 # --------------------------- Validation & Prep -------------------------- #
 def _validate_trace(execution_trace: Dict[str, Any]) -> None:
+    """
+    Validates the structural integrity of the execution trace.
+
+    Parameters:
+        execution_trace (dict): Candidate trace object to validate.
+
+    Returns:
+        None
+
+    Initial State:
+        - execution_trace is a Python object provided by the caller.
+
+    Final State:
+        - Ensures trace has a non-empty 'steps' list with dict items containing 'agent' and 'output'.
+
+    Raises:
+        ValueError: If the trace is not a dict, has no steps, or steps are malformed.
+
+    Water Cost:
+        - 0 waterdrops (validation only).
+    """
     if not isinstance(execution_trace, dict):
         raise ValueError("execution_trace must be a dict")
     steps = execution_trace.get("steps")
@@ -266,8 +408,25 @@ def _validate_trace(execution_trace: Dict[str, Any]) -> None:
 
 def _validate_policies_mandatory(execution_trace: Dict[str, Any]) -> None:
     """
-    Enforce that per-agent policies are present and cover all agents in the trace.
-    Raises ValueError if missing/invalid.
+    Enforces presence and minimal shape of per-agent audit policies.
+
+    Parameters:
+        execution_trace (dict): Trace object expected to contain 'policies'.
+
+    Returns:
+        None
+
+    Initial State:
+        - execution_trace is already structurally valid (see _validate_trace).
+
+    Final State:
+        - Confirms that every agent appearing in steps has a corresponding non-empty policy with 'rules' list.
+
+    Raises:
+        ValueError: If 'policies' is missing/empty, or any agent policy is missing/invalid.
+
+    Water Cost:
+        - 0 waterdrops (validation only).
     """
     policies = execution_trace.get("policies")
     if not isinstance(policies, dict) or not policies:
@@ -296,7 +455,26 @@ def _validate_policies_mandatory(execution_trace: Dict[str, Any]) -> None:
 
 def _compact_trace(execution_trace: Dict[str, Any], max_chars_per_field: int = 800) -> Dict[str, Any]:
     """
-    Make the trace token-safe: trim big strings, keep essential keys only.
+    Generates a token-safe compact representation of the execution trace.
+
+    Parameters:
+        execution_trace (dict): Full trace to compact.
+        max_chars_per_field (int): Maximum number of characters to keep per string field.
+
+    Returns:
+        dict: {"steps": [{"agent":..., "has_error":bool, "input_preview":..., "output_preview":..., "error":...}, ...]}
+
+    Initial State:
+        - execution_trace contains arbitrary nested structures (strings/lists/dicts).
+
+    Final State:
+        - Oversized fields are truncated; arrays/maps are cropped to limit token usage.
+
+    Raises:
+        None
+
+    Water Cost:
+        - 0 waterdrops (local processing).
     """
     compact_steps: List[Dict[str, Any]] = []
     for s in execution_trace.get("steps", []):
@@ -313,7 +491,29 @@ def _compact_trace(execution_trace: Dict[str, Any], max_chars_per_field: int = 8
 
 
 def _preview(value: Any, max_chars: int) -> Any:
-    """Reduce large nested structures into compact previews."""
+    """
+    Produces a size-limited preview of arbitrary JSON-like values.
+
+    Parameters:
+        value (Any): Input value (str/dict/list/number/bool/None/other).
+        max_chars (int): Maximum characters for any string representation.
+
+    Returns:
+        Any: A preview version of `value` with strings truncated, lists/maps cropped,
+             and non-serializables converted to short strings.
+
+    Initial State:
+        - Value may be deeply nested and large.
+
+    Final State:
+        - Output is safe to include in prompts without blowing token budgets.
+
+    Raises:
+        None
+
+    Water Cost:
+        - 0 waterdrops (local processing).
+    """
     if value is None:
         return None
     if isinstance(value, str):
@@ -328,5 +528,4 @@ def _preview(value: Any, max_chars: int) -> Any:
             out[str(k)] = _preview(v, max_chars)
         return out
     return str(value)[:max_chars]
-
 
