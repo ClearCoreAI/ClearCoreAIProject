@@ -21,36 +21,31 @@ Initial State:
 - manifest.json describes declared capabilities
 
 Final State:
-- Agent is registered to orchestrator
 - Static articles are retrievable
 - Water usage and mood are updated on each call
 
-Version: 0.2.3
+Version: 0.2.4
 Validated by: Olivier Hays
 Date: 2025-06-20
 
 Estimated Water Cost:
-- 1 waterdrop per /health call
+- 0 waterdrop per /health call
 - 1 waterdrops per /get_articles call
 - 0.02 waterdrops per /execute call
 """
 
 # ----------- Imports ----------- #
-import os
 import time
 import json
-import requests
 from fastapi import FastAPI, HTTPException, Request
 from pathlib import Path
-from tools.water import increment_aiwaterdrops, load_aiwaterdrops, get_aiwaterdrops
+from tools.water import increment_aiwaterdrops, get_aiwaterdrops
 
 # ----------- Constants ----------- #
-ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://orchestrator:8000/register_agent")
 AGENT_NAME = "fetch_articles"
 START_TIME = time.time()
-AIWATERDROPS_FILE = Path("memory/short_term/aiwaterdrops.json")
 ARTICLES_DIR = Path("memory/long_term/")
-VERSION = "0.2.3"
+VERSION = "0.2.4"
 
 # ----------- App Initialization ----------- #
 app = FastAPI(title="Fetch Articles Agent", version=VERSION)
@@ -62,8 +57,6 @@ try:
         mood = json.load(mood_json)
 except FileNotFoundError:
     mood = {"current_mood": "happy", "last_summary": None}
-# Current water consumption
-aiwaterdrops_consumed = load_aiwaterdrops()
 
 # ----------- Capabilities ----------- #
 def fetch_static_articles() -> dict:
@@ -122,7 +115,7 @@ def generate_article_collection(data: dict) -> dict:
         - 0.02 per call
     """
     articles = data.get("articles", [])
-    increment_aiwaterdrops(0.2)
+    increment_aiwaterdrops(0.02)
     return {
         "collection": {
             "count": len(articles),
@@ -223,7 +216,7 @@ def get_metrics() -> dict:
     uptime_seconds = int(time.time() - START_TIME)
     return {
         "agent_name": AGENT_NAME,
-        "version": "0.2.2",
+        "version": VERSION,
         "uptime_seconds": uptime_seconds,
         "current_mood": mood.get("current_mood", "unknown"),
         "aiwaterdrops_consumed": get_aiwaterdrops()
@@ -314,10 +307,6 @@ async def execute(request: Request) -> dict:
         raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
 
 # ----------- Audit Policy Endpoint (generic) ----------- #
-import json
-import os
-from pathlib import Path
-from fastapi import HTTPException
 
 AUDIT_POLICY_FILE = Path("audit_policy.json")
 # Petit cache en mémoire pour éviter de relire le disque à chaque appel
@@ -424,7 +413,6 @@ def _load_audit_policy() -> dict:
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"Invalid JSON in audit_policy.json: {str(e)}")
     except HTTPException:
-        # Propager les erreurs déjà formées ci-dessus
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load audit_policy.json: {str(e)}")

@@ -27,28 +27,30 @@ Final State:
 - Mood state is updated and persisted
 - Waterdrop usage is tracked per summary and exposed via `/metrics`
 
-Version: 0.2.2
+Version: 0.2.3
 Validated by: Olivier Hays
-Date: 2025-06-20
+Date: 2025-06-21
 
 Estimated Water Cost:
-- 1 waterdrop per /health call
+- 0 waterdrop per /health call
 - variable per /summarize and /execute structured summarization (depends on articles)
 - 0.02 waterdrops per /execute dispatch
 """
 
 # ----------- Imports ----------- #
-import json
+
 import time
 from typing import Any, Dict, List
-
 from fastapi import FastAPI, HTTPException, Request
 from tools.llm_utils import summarize_with_mistral
-from tools.water import increment_aiwaterdrops, load_aiwaterdrops, get_aiwaterdrops
+from tools.water import increment_aiwaterdrops, get_aiwaterdrops
+import json
+from pathlib import Path
+
 
 # ----------- Constants ----------- #
 AGENT_NAME = "summarize_articles"
-VERSION = "0.2.2"
+VERSION = "0.2.3"
 
 # ----------- Credentials ----------- #
 # LLM Key
@@ -70,9 +72,6 @@ try:
 except FileNotFoundError:
     # Use a single, consistent key across the app: current_mood
     mood = {"current_mood": "neutral", "last_summary": None}
-
-# Current water consumption
-aiwaterdrops_consumed = load_aiwaterdrops()
 
 # ----------- Helper Functions ----------- #
 def _coerce_articles(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -224,15 +223,15 @@ def get_capabilities() -> dict:
     Final State:
         - Extracted list of capabilities is returned
 
-    Raises:
-        FileNotFoundError: If manifest is missing
-
     Water Cost:
         - 0
     """
-    with open("manifest.json", "r") as manifest_json:
-        manifest = json.load(manifest_json)
-    return {"capabilities": manifest.get("capabilities", [])}
+    try:
+        with open("manifest.json", "r") as manifest_json:
+            manifest = json.load(manifest_json)
+        return {"capabilities": manifest.get("capabilities", [])}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="manifest.json not found")
 
 
 @app.post("/summarize")
@@ -355,10 +354,6 @@ def get_mood() -> dict:
     }
 
 # ----------- Audit Policy Endpoint (generic) ----------- #
-import json
-import os
-from pathlib import Path
-from fastapi import HTTPException
 
 AUDIT_POLICY_FILE = Path("audit_policy.json")
 # Petit cache en mémoire pour éviter de relire le disque à chaque appel

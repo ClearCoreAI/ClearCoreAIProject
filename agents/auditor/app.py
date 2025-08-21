@@ -63,9 +63,9 @@ Final State:
 - Structured audit is returned
 - Mood and water usage are updated
 
-Version: 0.3.0 (LLM + policy passthrough)
+Version: 0.3.1 (LLM + policy passthrough)
 Validated by: Olivier Hays
-Date: 2025-08-11
+Date: 2025-08-21
 
 Estimated Water Cost:
 - ~6 + 0.5*steps waterdrops per /run (LLM call)
@@ -152,7 +152,7 @@ from tools.llm_utils import audit_trace_with_mistral
 
 # ----------- Constants ----------- #
 AGENT_NAME = "auditor agent"
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
 
 # ----------- Credentials ----------- #
@@ -177,9 +177,6 @@ try:
 except FileNotFoundError:
     print("Warning: mood.json missing, initializing defaults.")
     mood = {"current_mood": "neutral", "last_check": None}
-
-aiwaterdrops_consumed = load_aiwaterdrops()
-
 
 # ----------- Models ----------- #
 class StepResult(BaseModel):
@@ -431,7 +428,7 @@ def health() -> dict:
         dict: Static health message.
 
     Water Cost:
-        - 1 waterdrop per call
+        - 0 waterdrop per call
     """
     return {"status": "Auditor Agent is up and running."}
 
@@ -607,6 +604,7 @@ async def execute(request: Request) -> dict:
     Water Cost:
         - 0.02 waterdrops per dispatch
     """
+    increment_aiwaterdrops(0.02)
     payload = await request.json()
     capability = payload.get("capability")
     input_data = payload.get("input", {})

@@ -56,8 +56,8 @@ Estimated Water Cost:
 - 3 waterdrops per planning (plus execution costs per agent)
 
 Validated by: Olivier Hays
-Date: 2025-06-20
-Version: 0.3.3
+Date: 2025-06-21
+Version: 0.3.4
 
 ----------------------------------------------------------------------
 Quick examples:
@@ -92,9 +92,6 @@ from tools.water import increment_aiwaterdrops, load_aiwaterdrops, get_aiwaterdr
 ROOT = Path(__file__).parent
 AGENTS_FILE = ROOT / "agents.json"
 TEMPLATE_FILE = ROOT / "manifest_template.json"
-AGENT_DIR = ROOT / "agents"
-LICENSE_FILE = ROOT / "license_keys.json"
-AIWATERDROPS_FILE = ROOT / "memory" / "short_term" / "aiwaterdrops.json"
 VERSION = "0.3.3"
 
 # ----------- Credentials ----------- #
@@ -126,46 +123,6 @@ except Exception as template_error:
     raise RuntimeError(f"Could not load manifest_template.json: {template_error}")
 
 # -------------- Helper functions -------------#
-def safe_json(obj, max_depth=6):
-    """
-    Produces a JSON-safe, acyclic structure from arbitrary Python objects.
-
-    Parameters:
-        obj (Any): Any Python object
-        max_depth (int): Hard cap to avoid deep recursion
-
-    Returns:
-        Any: A structure composed of dict/list/str/float/int/bool/None
-
-    Initial State:
-        - Object may include non-serializable leaves or cycles
-
-    Final State:
-        - JSON-safe structure with truncated depth
-
-    Raises:
-        None
-
-    Water Cost:
-        - 0 (internal)
-    """
-    if max_depth <= 0:
-        return str(obj)
-    if obj is None or isinstance(obj, (bool, int, float, str)):
-        return obj
-    if isinstance(obj, (list, tuple)):
-        return [safe_json(x, max_depth - 1) for x in obj]
-    if isinstance(obj, dict):
-        out = {}
-        for k, v in obj.items():
-            sk = k if isinstance(k, str) else str(k)
-            out[sk] = safe_json(v, max_depth - 1)
-        return out
-    try:
-        json.dumps(obj)
-        return obj
-    except Exception:
-        return str(obj)
 
 def _load_agents() -> dict:
     """
@@ -225,33 +182,6 @@ def _save_agents(registry: dict) -> None:
     except Exception as save_error:
         raise RuntimeError(f"Failed to persist registry: {save_error}")
 
-def _load_agent_manifest(agent_name: str) -> dict:
-    """
-    Loads an agent's manifest.json from agents/<agent_name>/.
-
-    Parameters:
-        agent_name (str): Agent folder name
-
-    Returns:
-        dict: Parsed manifest content
-
-    Initial State:
-        - agents/<agent_name>/manifest.json exists
-
-    Final State:
-        - Manifest dict is returned
-
-    Raises:
-        FileNotFoundError: If manifest is missing
-
-    Water Cost:
-        - 0 (internal)
-    """
-    manifest_path = AGENT_DIR / agent_name / "manifest.json"
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"Manifest not found for agent: {agent_name}")
-    with manifest_path.open("r", encoding="utf-8") as f:
-        return json.load(f)
 
 def _are_specs_compatible(output_spec: dict, input_spec: dict) -> bool:
     """
@@ -331,42 +261,58 @@ def register_agent(agent: AgentRegistration):
         - 0.2 waterdrops
     """
     try:
+        # Step 1: Fetch the manifest from the agent’s base_url
+        # This is the contract that describes its capabilities and specs.
         resp = requests.get(f"{agent.base_url}/manifest", timeout=5)
-        resp.raise_for_status()
-        manifest = resp.json()
+        resp.raise_for_status()  # raise if HTTP error (e.g., 404 or timeout)
+        manifest = resp.json()   # parse JSON from response
     except requests.exceptions.RequestException as req_error:
+        # Could not connect to agent (network error, timeout, etc.)
         raise HTTPException(status_code=400, detail=f"Cannot reach agent at {agent.base_url}: {req_error}")
     except Exception as json_error:
+        # Response body was not valid JSON
         raise HTTPException(status_code=400, detail=f"Invalid JSON from /manifest: {json_error}")
 
-    # Normalize capabilities: accept ["cap"], [{"name": "cap"}], or { "cap": "desc" }
+    # Step 2: Normalize the "capabilities" field into a consistent format
+    # Agents may provide capabilities in different structures: list of strings,
+    # list of dicts, or dict mapping names → descriptions.
     raw_caps = manifest.get("capabilities", [])
     normalized_caps = []
+
     if isinstance(raw_caps, list):
+        # Case A: ["capability1", "capability2"] or [{"name": "capability1", "description": "..."}]
         for cap in raw_caps:
             if isinstance(cap, str):
+                # Convert simple string into dict with name + empty description
                 normalized_caps.append({"name": cap, "description": ""})
             elif isinstance(cap, dict):
+                # Extract fields from dict form
                 name = cap.get("name") or cap.get("capability") or cap.get("id")
                 desc = cap.get("description", "")
                 custom = cap.get("custom_input_handler")
                 if name:
                     item = {"name": name, "description": desc}
                     if custom:
+                        # Preserve custom input handler if present
                         item["custom_input_handler"] = custom
                     normalized_caps.append(item)
+
     elif isinstance(raw_caps, dict):
+        # Case B: {"capability1": "description text", "capability2": "desc"}
         for k, v in raw_caps.items():
             normalized_caps.append({"name": k, "description": str(v) if v is not None else ""})
 
+    # Replace original capabilities with normalized format
     manifest["capabilities"] = normalized_caps
 
     try:
+        # Step 3: Validate manifest against global JSON schema
+        # This ensures required fields and formats are correct.
         validate(instance=manifest, schema=manifest_template)
     except ValidationError as validation_error:
         raise HTTPException(status_code=400, detail=f"Manifest invalid: {validation_error.message}")
 
-    # Build structured capabilities for quick lookup
+    # Step 4: Build a dictionary of capabilities for quick lookups later
     capabilities_dict = {}
     for cap in manifest.get("capabilities", []):
         name = cap.get("name")
@@ -376,6 +322,7 @@ def register_agent(agent: AgentRegistration):
                 "custom_input_handler": cap.get("custom_input_handler")
             }
 
+    # Step 5: Store the agent in the in-memory registry
     agents_registry[agent.name] = {
         "base_url": agent.base_url,
         "manifest": manifest,
@@ -383,11 +330,15 @@ def register_agent(agent: AgentRegistration):
     }
 
     try:
+        # Step 6: Persist the updated registry to agents.json
         _save_agents(agents_registry)
     except RuntimeError as save_error:
         raise HTTPException(status_code=500, detail=str(save_error))
 
+    # Step 7: Increment water usage (small cost for registration)
     increment_aiwaterdrops(0.2)
+
+    # Step 8: Return confirmation message
     return {"message": f"Agent '{agent.name}' registered successfully."}
 
 @app.get("/agents")
@@ -673,27 +624,28 @@ def execute_plan_string(plan: str) -> dict:
     Executes the plan step-by-step and returns a full execution trace.
 
     Parameters:
-        plan (str): "N. agent → capability" per line
+        plan (str): Multiline plan, one step per line like:
+                    "1. agent_name → capability"
 
     Returns:
         dict: {
-            "trace": [ {step, agent, capability, input_used, output, error}... ],
-            "final_output": <last business output or last output>,
-            "total_waterdrops_used": <float from final_output.waterdrops_used or 0.0>
+            "trace": [
+                {step, agent, capability, input_used, output, error}...
+            ],
+            "final_output": <last meaningful output>,
+            "total_waterdrops_used": <float>
         }
 
     Initial State:
-        - All agents in the plan are registered and reachable via /execute
+        - All referenced agents are registered in agents_registry
+        - Each agent implements POST /execute
 
     Final State:
-        - Each step is invoked; context is passed along; trace is accumulated
-
-    Raises:
-        None (errors captured per-step in the trace)
-
-    Water Cost:
-        - 0.02 (fixed) + per-agent execution costs downstream
+        - Each step has been called sequentially
+        - Execution trace records input, output, and errors
     """
+
+    # --- Helper: get all advertised capabilities for a given agent ---
     def _capabilities_for(agent_name: str) -> set:
         caps = agents_registry.get(agent_name, {}).get("manifest", {}).get("capabilities", [])
         names = set()
@@ -704,32 +656,43 @@ def execute_plan_string(plan: str) -> dict:
                 names.add(c)
         return names
 
+    # --- Helper: clean previous output before sending it as new input ---
+    # Strips out special fields like waterdrops_used
     def _clean_input(ctx):
         if isinstance(ctx, dict):
             return {k: v for k, v in ctx.items() if k not in ("waterdrops_used",)}
         return ctx
 
-    results = []
-    context = None
-    business_context = None
+    # --- Execution state ---
+    results = []          # full trace of steps
+    context = None        # raw context passed between steps
+    business_context = None  # last "meaningful" output (ignores audit trace cases)
 
+    # --- Step through each line of the plan ---
     for raw in plan.splitlines():
         step_line = raw.strip()
         if not step_line or step_line.startswith("#"):
+            # Skip blank lines or commented steps
             continue
 
+        # Normalize arrow symbols
         step_line = step_line.replace("->", "→")
+
+        # Parse line: "N. agent → capability"
         m = re.match(r"^\d+\.\s*([A-Za-z0-9_]+)\s*→\s*([A-Za-z0-9_]+)$", step_line)
         if not m:
             results.append({"step": step_line, "error": "Unrecognized format"})
             continue
 
         agent_name, capability = m.groups()
+
+        # Check agent exists in registry
         agent = agents_registry.get(agent_name)
         if not agent:
             results.append({"step": step_line, "error": f"Agent '{agent_name}' not registered"})
             continue
 
+        # Check capability is advertised by that agent
         available = _capabilities_for(agent_name)
         if capability not in available:
             results.append({
@@ -742,14 +705,16 @@ def execute_plan_string(plan: str) -> dict:
             continue
 
         try:
+            # --- Build input for this step ---
             payload_input = _clean_input(context)
 
-            # Detect meta-capability via custom_input_handler
+            # Check if the agent has a special input handler (e.g. needs whole execution trace)
             manifest_caps = agents_registry[agent_name]["manifest"].get("capabilities", [])
             cap_obj = next((c for c in manifest_caps if isinstance(c, dict) and c.get("name") == capability), None)
             custom_handler = cap_obj.get("custom_input_handler") if isinstance(cap_obj, dict) else None
 
             if custom_handler == "use_execution_trace":
+                # Instead of just previous context, pass the entire accumulated trace
                 payload_input = {
                     "steps": [
                         {
@@ -763,37 +728,44 @@ def execute_plan_string(plan: str) -> dict:
                     ]
                 }
 
+            # Ensure payload is a dict
             if not isinstance(payload_input, dict) and payload_input is not None:
                 payload_input = {"_value": payload_input}
             if payload_input is None:
                 payload_input = {}
 
-            # Attach base_url hint for downstream audit agents
+            # Always include agent’s base_url for auditing/debug
             payload_input["_agent_base_url"] = agent["base_url"]
 
+            # --- Call the agent's /execute endpoint ---
             url = f"{agent['base_url']}/execute"
             payload = {"capability": capability, "input": payload_input}
             resp = requests.post(url, json=payload, timeout=30)
             resp.raise_for_status()
             out = resp.json()
 
+            # Make sure returned dict includes base_url reference
             if isinstance(out, dict):
                 out.setdefault("_agent_base_url", agent["base_url"])
 
+            # Record successful step
             results.append({
                 "step": step_line,
                 "agent": agent_name,
                 "capability": capability,
-                "input_used": payload_input if payload_input is not None else {},
+                "input_used": payload_input,
                 "output": out,
                 "error": None
             })
 
+            # Update rolling contexts
             context = out
             if custom_handler != "use_execution_trace":
+                # Only update business_context when it’s a “normal” capability
                 business_context = out
 
         except Exception as e:
+            # Record error and stop execution
             results.append({
                 "step": step_line,
                 "agent": agent_name,
@@ -804,8 +776,10 @@ def execute_plan_string(plan: str) -> dict:
             })
             break
 
+    # Fixed overhead cost for orchestrator execution
     increment_aiwaterdrops(0.02)
 
+    # Decide what counts as the "final output"
     final_context = business_context if business_context is not None else context
 
     return {
@@ -813,7 +787,6 @@ def execute_plan_string(plan: str) -> dict:
         "final_output": final_context,
         "total_waterdrops_used": final_context.get("waterdrops_used", 0.0) if isinstance(final_context, dict) else 0.0
     }
-
 @app.post("/execute_plan")
 def execute_plan(request: dict):
     """
