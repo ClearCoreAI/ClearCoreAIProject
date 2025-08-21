@@ -1,0 +1,61 @@
+{
+  "name": "generic_agent",
+  "version": "0.1.0",
+  "description": "This agent performs a defined capability based on provided inputs and generates structured outputs.",
+  "author": "Agent Author Name",
+  "input_spec": {
+    "type": "object",
+    "properties": {
+      "inputs": {
+        "type": "array",
+        "description": "List of input objects. Each object must conform to the agent's input structure.",
+        "items": {
+          "type": "object",
+          "description": "Input object"
+        }
+      }
+    },
+    "required": ["inputs"]
+  },
+  "output_spec": {
+    "type": "object",
+    "properties": {
+      "outputs": {
+        "type": "array",
+        "description": "List of output objects resulting from agent execution.",
+        "items": {
+          "type": "object",
+          "description": "Output object"
+        }
+      },
+      "resource_estimate": {
+        "type": "object",
+        "description": "Estimated cost in abstract units (e.g., compute, memory, tokens, waterdrops)",
+        "properties": {
+          "units": { "type": "string" },
+          "value": { "type": "number" }
+        }
+      }
+    }
+  },
+  "capabilities": [
+    {
+      "name": "capability_1",
+      "description": "Describe the abstract capability of this agent (e.g. summarization, translation, image generation).",
+      "input_types": ["object"],
+      "output_types": ["object"]
+    }
+  ],
+  "required_dependencies": [
+    {
+      "name": "dependency_name",
+      "type": "external_api",
+      "description": "Specify the name and type of any dependency this agent relies on (e.g. external LLM, model, library)."
+    }
+  ],
+  "api": {
+    "endpoint": "/run",
+    "method": "POST"
+  },
+  "tags": ["agent", "clearcoreai", "modular", "capability", "generic"]
+}
